@@ -1,0 +1,53 @@
+# `bff-gateway` — a WORKED EXAMPLE of an in-house BFF gateway pattern: a
+# private, non-public GraphQL client of the kind large frontend fleets build for
+# themselves. It is here to show that everything shop-specific can be expressed
+# as adapter DATA — nothing about this shape lives in `src/`.
+#
+# Shape:
+#   src/service/gateway/endpoints/<path>/index.ts
+#       export const $gateway = GatewayEndpoint.create({
+#         name: 'X', gqlNode: !browser && gql`query X($id: ID!) { … }`, mapper })
+#       export const client = $gateway.getClientHandler('<path>')
+#   … consumed anywhere as `apiMain.<name>.call(variables)`.
+
+name    = "bff-gateway"
+detect  = ["@acme/gateway", "@acme/mf-core"]
+include = ["tanstack-query", "felte"]
+
+# The document is a `gql` tagged template anywhere in the endpoint file; the
+# result mapper is the `mapper` sibling of the object literal that holds it.
+[[operation]]
+tags        = ["gql", "graphql"]
+tag_suffix  = [".gql"]
+mapper_prop = "mapper"
+
+# `getClientHandler('<path>')` wraps the op into a callable that is re-exported
+# through a registry and invoked as `.call(v)` / `.cache()` / `.fetch(v)`.
+# `route` turns each one into the BFF HTTP surface it actually is.
+[[handler]]
+kind         = "path"
+factories    = ["getClientHandler", "getHandler", "getSuccessHandler"]
+path_arg     = 0
+on_receiver  = true      # always `<endpoint>.getClientHandler('…')`, never bare
+op_dir_regex = '(?:^|/)endpoints/(.+)/index\.[tj]s$'
+methods      = ["call", "cache", "fetch", "mutate", "query", "preload", "load"]
+route        = "POST /api/{path}"
+body         = "variables"
+
+# A microfrontend's untrusted surface IS its route: `mfDefine({path:'/x/[id]'})`
+# mounts an app at a parameterised route (the SvelteKit-universal `$props()` /
+# `$page.params` half of this stays in the core).
+[[source]]
+call = "mfDefine"
+fqn  = "read:route.params"
+
+# Identity-preserving wrappers such a shop writes (the lodash-shaped ones —
+# debounce/throttle/memoize/memo/once — are universal and stay in the core).
+[[identity_hof]]
+name = "rafThrottle"
+[[identity_hof]]
+name = "withTryCatch"
+[[identity_hof]]
+name = "tryCatch"
+[[identity_hof]]
+name = "withErrorBoundary"

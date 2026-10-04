@@ -1,0 +1,23 @@
+# `@tanstack/*-query` — the callback the framework stores and later invokes.
+# The wiring lives in node_modules and no symbol resolution reaches it, so it
+# is modelled as data: which option property holds the callback, and which
+# methods of the returned handle invoke it.
+name   = "tanstack-query"
+detect = ["@tanstack/query-core", "@tanstack/svelte-query", "@tanstack/react-query", "@tanstack/vue-query", "@tanstack/solid-query"]
+
+[[callback_factory]]
+name = "createMutation"
+[[callback_factory]]
+name = "createQuery"
+[[callback_factory]]
+name = "fetchQuery"
+[[callback_factory]]
+name = "useMutation"
+
+[[handle_method]]
+prop    = "mutationFn"
+methods = ["mutate", "mutateAsync"]
+
+[[handle_method]]
+prop    = "queryFn"
+methods = ["refetch"]

@@ -1,0 +1,6 @@
+{
+  "name": "apollo-fixture",
+  "private": true,
+  "type": "module",
+  "dependencies": { "@apollo/client": "^3.11.0", "graphql": "^16.9.0" }
+}

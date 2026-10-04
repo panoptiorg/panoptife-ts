@@ -1,0 +1,39 @@
+# `graphql-request` — the minimal public client, plus the codegen SDK it ships.
+#
+#   await request(URL, DOC, variables)
+#   await client.request(DOC, variables)
+#   const sdk = getSdk(client); await sdk.Login({ pincode })
+#
+# The SDK form is the interesting one: the callable's METHOD NAME is the
+# operation name in the document, which the core already indexes.
+name   = "graphql-request"
+detect = ["graphql-request"]
+
+[[operation]]
+tags       = ["gql", "graphql"]
+tag_suffix = [".gql"]
+
+# `request(url, DOC, variables)` — tried first; falls through when arg 1 is not
+# a document, which is exactly the `client.request(DOC, variables)` case below.
+[[invoke]]
+callee   = "request"
+doc_arg  = 1
+vars_arg = 2
+
+[[invoke]]
+callee   = "request"
+doc_arg  = 0
+vars_arg = 1
+
+[[invoke]]
+callee      = "rawRequest"
+doc_arg     = 0
+vars_arg    = 1
+result_prop = "data"
+
+# `getSdk(client).OpName(variables)` — bind the member name to the operation of
+# that name.
+[[handler]]
+kind      = "sdk"
+factories = ["getSdk", "getSdkWithHooks"]
+vars_arg  = 0

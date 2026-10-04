@@ -1,0 +1,6 @@
+{
+  "name": "graphql-request-fixture",
+  "private": true,
+  "type": "module",
+  "dependencies": { "graphql-request": "^7.1.0", "graphql": "^16.9.0" }
+}

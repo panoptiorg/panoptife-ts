@@ -1,0 +1,11 @@
+# `felte` — `createForm({ onSubmit })` stores the submit callback and invokes it
+# through `handleSubmit`.
+name   = "felte"
+detect = ["felte", "@felte/core", "@felte/svelte", "@felte/react"]
+
+[[callback_factory]]
+name = "createForm"
+
+[[handle_method]]
+prop    = "onSubmit"
+methods = ["handleSubmit"]

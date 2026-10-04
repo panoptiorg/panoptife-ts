@@ -1,0 +1,13 @@
+#!/usr/bin/env node
+// Thin shim so callers never need tsx: `npm run build` produces dist/cli.js.
+import { existsSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+
+const here = dirname(fileURLToPath(import.meta.url));
+const entry = join(here, '..', 'dist', 'cli.js');
+if (!existsSync(entry)) {
+  process.stderr.write(`pc-fe-ts: ${entry} missing — run \`npm ci && npm run build\` in ${join(here, '..')}\n`);
+  process.exit(1);
+}
+await import(pathToFileURL(entry).href);

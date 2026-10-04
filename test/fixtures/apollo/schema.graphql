@@ -1,0 +1,8 @@
+type Query {
+  user(id: ID!): User!
+}
+type Mutation {
+  login(token: String!, remember: Boolean): Session!
+}
+type User { id: ID!, name: String! }
+type Session { token: String!, user: User! }

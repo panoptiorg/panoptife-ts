@@ -1,0 +1,56 @@
+# `@apollo/client` — the most common public GraphQL client. Four shapes:
+#
+#   const [mutate]     = useMutation(LOGIN);  mutate({ variables: { id } })
+#   const { data }     = useQuery(GET, { variables: { id } })
+#   const { data }     = await client.mutate({ mutation: LOGIN, variables })
+#   const { data }     = await client.query({ query: GET, variables })
+#
+# In every one the document is a `gql` tagged template the repo declares, so the
+# core's document->`$op` machinery is reused verbatim; only the BINDING differs.
+name   = "apollo"
+detect = ["@apollo/client", "@apollo/client-react-streaming", "apollo-client", "apollo-boost"]
+
+[[operation]]
+tags       = ["gql", "graphql"]
+tag_suffix = [".gql"]
+
+# `const [mutate, { data }] = useMutation(DOC)` — the callable is element 0 of
+# the destructured result, and the variables arrive under `variables`.
+[[handler]]
+kind      = "doc"
+factories = ["useMutation"]
+doc_arg   = 0
+bind      = "array0"
+vars_prop = "variables"
+
+# `useQuery(DOC, { variables })` — document and variables at the same call.
+[[invoke]]
+callee    = "useQuery"
+doc_arg   = 0
+vars_arg  = 1
+vars_prop = "variables"
+result_prop = "data"
+
+[[invoke]]
+callee    = "useSuspenseQuery"
+doc_arg   = 0
+vars_arg  = 1
+vars_prop = "variables"
+result_prop = "data"
+
+# `client.mutate({ mutation: DOC, variables })` / `client.query({ query: DOC, variables })`
+[[invoke]]
+callee      = "mutate"
+doc_arg     = 0
+doc_prop    = "mutation"
+vars_arg    = 0
+vars_prop   = "variables"
+result_prop = "data"
+
+[[invoke]]
+callee      = "query"
+doc_arg     = 0
+doc_prop    = "query"
+vars_arg    = 0
+vars_prop   = "variables"
+result_prop = "data"
