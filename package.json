@@ -1,6 +1,6 @@
 {
   "name": "@panoptiorg/panoptife-ts",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "TypeScript/Svelte frontend for Panopticode: emits CGF (Code Graph Facts) from a SvelteKit-shaped repo",
   "license": "Apache-2.0",
   "type": "module",
