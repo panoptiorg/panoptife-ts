@@ -263,6 +263,17 @@ function propName(pr: ts.ObjectLiteralElementLike): string {
   return '';
 }
 
+/** a class method's name as written (`find`, `#check`, `'find-by-name'`, `42`,
+ *  `['by-id']`); any other computed name is `[computed]` */
+function memberName(n: ts.PropertyName): string {
+  if (ts.isComputedPropertyName(n)) {
+    return ts.isStringLiteralLike(n.expression) || ts.isNumericLiteral(n.expression)
+      ? n.expression.text
+      : '[computed]';
+  }
+  return n.text;
+}
+
 interface FnShape {
   params: readonly ts.ParameterDeclaration[];
   body: ts.Node;
@@ -385,18 +396,53 @@ function routeNameFor(tpl: string, spec: FnSpec): string | undefined {
   return bad ? undefined : out;
 }
 
-function endpointNameFor(rel: string, sym: string): string | undefined {
-  const base = path.posix.basename(rel);
-  const server =
-    base === '+server.ts' ||
-    base === '+server.js' ||
-    base.endsWith('.server.ts') ||
-    base.endsWith('.server.js');
-  if (!server) return undefined;
-  const route = path.posix.dirname(rel);
-  if (sym === 'load' || sym.startsWith('actions')) return `${sym} ${route}`;
-  if (HTTP_METHODS.has(sym)) return `${sym} ${route}`;
-  return undefined;
+/** Names the file exports under their own name: `export function f`,
+ *  `export const f = …`, `export { f }`. A rename (`export { h as GET }`) and a
+ *  re-export from another module are not included. */
+function exportedNames(sf: ts.SourceFile): Set<string> {
+  const out = new Set<string>();
+  const exported = (st: ts.FunctionDeclaration | ts.VariableStatement) =>
+    st.modifiers?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword) ?? false;
+  for (const st of sf.statements) {
+    if (ts.isFunctionDeclaration(st) && st.name && exported(st)) out.add(st.name.text);
+    else if (ts.isVariableStatement(st) && exported(st)) {
+      for (const d of st.declarationList.declarations) {
+        if (ts.isIdentifier(d.name)) out.add(d.name.text);
+      }
+    } else if (
+      ts.isExportDeclaration(st) &&
+      !st.isTypeOnly &&
+      !st.moduleSpecifier &&
+      st.exportClause &&
+      ts.isNamedExports(st.exportClause)
+    ) {
+      for (const el of st.exportClause.elements) {
+        if (el.isTypeOnly) continue;
+        if (!el.propertyName || el.propertyName.text === el.name.text) out.add(el.name.text);
+      }
+    }
+  }
+  return out;
+}
+
+/** The HTTP endpoint a function is, if any. SvelteKit serves these exports:
+ *  `load` in `+page.server` and `+layout.server`, each member of `actions` in
+ *  `+page.server`, and the HTTP method handlers in `+server` (`.ts` or `.js`).
+ *  Other files, server-only `*.server.ts` modules included, have none. */
+function endpointNameFor(
+  rel: string,
+  sym: string,
+  exported: ReadonlySet<string>,
+): string | undefined {
+  const m = /^\+(page\.server|layout\.server|server)\.[jt]s$/.exec(path.posix.basename(rel));
+  if (!m) return undefined;
+  const dot = sym.indexOf('.');
+  if (!exported.has(dot < 0 ? sym : sym.slice(0, dot))) return undefined;
+  const ok =
+    m[1] === 'server'
+      ? HTTP_METHODS.has(sym)
+      : sym === 'load' || (m[1] === 'page.server' && /^actions\.[^.$][^.]*$/.test(sym));
+  return ok ? `${sym} ${path.posix.dirname(rel)}` : undefined;
 }
 
 function parseFile(
@@ -475,6 +521,7 @@ function parseFile(
   });
 
   const consumed = new Set<ts.Statement>();
+  const exported = svelte ? new Set<string>() : exportedNames(sf);
 
   const symSeen = new Map<string, number>();
   const addSpec = (
@@ -497,7 +544,7 @@ function parseFile(
       params: [...params],
       body,
       pos,
-      endpoint: endpointNameFor(rel, sym),
+      endpoint: endpointNameFor(rel, sym, exported),
       ...extra,
     };
     // An adapter `[[handler]] route = "POST /api/{path}"` says this callable IS
@@ -532,7 +579,7 @@ function parseFile(
     if (ts.isClassDeclaration(st) && st.name) {
       for (const m of st.members) {
         if ((ts.isMethodDeclaration(m) || ts.isConstructorDeclaration(m)) && m.body) {
-          const nm = m.name && ts.isIdentifier(m.name) ? m.name.text : 'constructor';
+          const nm = ts.isConstructorDeclaration(m) ? 'constructor' : memberName(m.name);
           addSpec(`${st.name.text}.${nm}`, 'fn', m.parameters, m.body, m.getStart(sf), {
             decl: m,
           });
@@ -2472,7 +2519,7 @@ function emitEmptyOutputWarnings(
   if (stats.endpoints === 0 && stats.ops === 0) {
     process.stderr.write(
       `warning: ${stats.endpoints} endpoints and ${stats.ops} operations emitted — nothing in this ` +
-        `repo is an input surface the tool recognises (SvelteKit +server.ts/.server.ts, or adapter ` +
+        `repo is an input surface the tool recognises (SvelteKit route exports, or adapter ` +
         `handler routes); a Go/TS corpus built from it will produce no chains rooted here\n`,
     );
   }

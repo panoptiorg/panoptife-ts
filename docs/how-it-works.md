@@ -60,10 +60,12 @@ declarations resolve more calls. There are two modes:
 - Typed (`node_modules` exists): the real `lib` and `@types` are loaded, and an
   external import is accepted only if it resolves to a `.d.ts` file, so
   library implementations are never pulled in. Types let calls through
-  generic factories resolve, and enable type anchors: a value whose type is a
-  generated `<Op>QueryVariables` or `<Op>Mutation` alias is linked to that
-  operation even when its callee is unresolvable (`--no-type-anchors` turns
-  this off).
+  generic factories resolve.
+
+In both modes the checker also gives type anchors: a value whose type is a
+generated `<Op>QueryVariables` or `<Op>Mutation` alias is linked to that
+operation even when its callee is unresolvable (`--no-type-anchors` turns this
+off). Untyped, only aliases declared in the repository's own files are visible.
 
 Every call target goes through the type checker (`getSymbolAtLocation`, then
 alias resolution, which handles re-exports and renames) to a declaration, and
@@ -90,11 +92,12 @@ and resolves through import tables only; it exists for comparison.
 ## Functions and naming
 
 Each file yields functions named `<repo-relative file>:<symbol>`: declarations,
-arrow functions, class methods (`Class.method`), object-literal members
-(`obj.key`), `default`, `$script` for a component, `$module` for leftover
-top-level code, and the synthetic `$op` and handler functions described below.
-Duplicate names get `$1`, `$2` suffixes. The package is the file's directory
-(`root` at the top level).
+arrow functions, class methods and constructors (`Class.method`,
+`Class.#private`, `Class.constructor`; a computed method name that is not a
+literal becomes `Class.[computed]`), object-literal members (`obj.key`),
+`default`, `$script` for a component, `$module` for leftover top-level code,
+and the synthetic `$op` and handler functions described below. Duplicate names
+get `$1`, `$2` suffixes. The package is the file's directory (`root` at the top level).
 
 A call that does not resolve inside the repository is emitted as an opaque call
 with a `callee_fqn` from a fixed vocabulary (`src/naming.ts`), which is what the
@@ -104,7 +107,8 @@ core's catalog matches against:
 |---|---|
 | `<module>.<name>` for an import | `$app/navigation.goto` |
 | `<Type>.<method>` for a known receiver | `URLSearchParams.get`, `Map.set` |
-| `.<method>` for an unknown receiver | `.push` |
+| `<prop>.<method>` for a property receiver of no known type | `items.push` (for `this.items.push(x)`) |
+| `.<method>` for any other unknown receiver | `.push` |
 | `read:<path>` for an input read | `read:$page.url`, `read:location.search`, `read:route.params` (for `$page.params`) |
 | `assign:<prop>` for a DOM write | `assign:innerHTML` |
 | `svelte:html`, `svelte:bind`, `svelte:tpl` | template constructs |
@@ -118,14 +122,18 @@ zero-argument call named `read:page.data`.
 
 (`endpointNameFor` in `src/analyze.ts`)
 
-In a file named `+server.ts`, `+server.js`, `*.server.ts` or `*.server.js`,
-the exports `load`, `actions*` and `GET`, `POST`, `PUT`, `PATCH`, `DELETE`,
-`HEAD` and `OPTIONS` become HTTP endpoints named `"<export> <directory>"`
-(`load src/routes/search`), where the directory is the file's
-repository-relative directory, not a URL. The function gets `binds_to` pointing
-at the endpoint and `source_params = [0]`: its first parameter is untrusted.
-`+page.ts`, `+layout.ts`, their `.js` forms and components are never
-endpoints. Adapters can add endpoints through a `route` template, which also
+These SvelteKit exports become HTTP endpoints: `load` in `+page.server.ts` and
+`+layout.server.ts`, each member of `actions` in `+page.server.ts`
+(`actions.default`), and `GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `HEAD` and
+`OPTIONS` in `+server.ts` (the `.js` forms too). An endpoint is named
+`"<export> <directory>"` (`load src/routes/search`), where the directory is the
+file's repository-relative directory, not a URL. The function gets `binds_to`
+pointing at the endpoint and `source_params = [0]`: its first parameter is
+untrusted. Only exports under their own name count (`export function`,
+`export const`, `export { load }`); a rename such as `export { handler as GET }`
+is not followed. Any other file is never an endpoint: `+page.ts`,
+`+layout.ts`, components, and server-only modules such as
+`src/lib/db.server.ts`. Adapters can add endpoints through a `route` template, which also
 names them (`POST /api/{path}` gives `POST /api/search` in `fixtures/webapp`);
 `--no-adapter-routes` turns those off.
 
@@ -187,7 +195,8 @@ skipped. Variables declared as `[]`, `T[]`, `Array<T>`, `new Map()` and similar
 also give their method calls a typed name (`Array.push`, `Map.set`).
 
 These edges have no effect unless the core's catalog has a `[[propagators]]`
-rule for the call. `--no-library-writeback` disables them.
+rule for the call. `--no-library-writeback` disables both the edges and these
+container names.
 
 ## Emission
 
@@ -230,9 +239,13 @@ own; see its [limitations](https://github.com/panoptiorg/panopticode/blob/master
 - A callback reached through a function parameter (`onChange?.(v)`) is not
   resolved; the call stays opaque.
 - `import(expr)` with a computed specifier stays opaque (`<dynamic>`).
-- Without the target's `node_modules` there are no type anchors, and calls that
-  need a library's types to resolve, such as calls through a generic factory,
-  stay unresolved ([call resolution](#the-typescript-program-and-call-resolution)).
+- Without the target's `node_modules`, calls that need a library's types to
+  resolve, such as calls through a generic factory, stay unresolved, and type
+  anchors see only aliases declared in the repository
+  ([call resolution](#the-typescript-program-and-call-resolution)).
+- Only methods and constructors with a body in a named top-level class
+  declaration become functions. Arrow-function properties, accessors and other property
+  initialisers produce no code, and calls to them stay opaque.
 - A `kit.alias` entry whose value is not a string literal is not seen; imports
   through it stay opaque unless `tsconfig.json` declares the same alias.
 - In components, props passed to children, `{#each}` bindings and slots are not

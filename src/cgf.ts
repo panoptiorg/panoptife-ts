@@ -1,8 +1,8 @@
 // CGF wire encoding. `proto/cgf.proto` is loaded at RUNTIME with protobufjs
-// (no codegen), so a schema change made by another workstream is picked up
-// automatically — including `CallSite.arg_names`, which is emitted only when
-// the loaded descriptor actually has the field (protobufjs silently drops
-// unknown keys, so a blind write would be a lie).
+// (no codegen), so a schema change is picked up automatically — including
+// `CallSite.arg_names`, which is emitted only when the loaded descriptor
+// actually has the field (protobufjs silently drops unknown keys, so a blind
+// write would be a lie).
 import { createRequire } from 'node:module';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -41,9 +41,9 @@ export const EndpointKind = { GRPC: 0, GRAPHQL: 1, HTTP: 2 } as const;
 
 export interface CgfCodec {
   encodePackage(pkg: unknown): Uint8Array;
-  /** true when the loaded cgf.proto declares CallSite.arg_names (WS-A). */
+  /** true when the loaded cgf.proto declares CallSite.arg_names. */
   hasArgNames: boolean;
-  /** true when the loaded cgf.proto declares GraphqlField.args (WS-A). */
+  /** true when the loaded cgf.proto declares GraphqlField.args. */
   hasGraphqlArgs: boolean;
   protoPath: string;
 }

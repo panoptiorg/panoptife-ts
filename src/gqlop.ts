@@ -11,7 +11,7 @@ import type { Sdl } from './sdl.js';
 export interface RemoteField {
   /** "AuthMutations.login" */
   typeField: string;
-  /** SDL arg names in document order */
+  /** argument names as written in the operation, in document order */
   argNames: string[];
   /** parallel to argNames: does the argument value reference an operation $var? */
   argUsesVar: boolean[];

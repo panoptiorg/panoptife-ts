@@ -1,3 +1,5 @@
+<img src=".github/logo.svg" alt="panoptife-ts logo" width="126" height="126">
+
 # panoptife-ts
 
 **The TypeScript and Svelte frontend for [Panopticode][core]: turns a SvelteKit app into code graph facts.**

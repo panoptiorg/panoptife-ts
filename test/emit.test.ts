@@ -211,6 +211,99 @@ export const load = async ({ url }) => {
   });
 });
 
+describe('SvelteKit endpoints', () => {
+  const d = extract({
+    'src/routes/a/+page.server.ts': `
+function load(id: string) { return id; }
+export function actionsLog(msg: string) { return msg; }
+export const actions = {
+  default: async ({ request }) => request,
+  save: (event) => () => event,
+};
+`,
+    'src/routes/b/+layout.server.ts': `
+const load = async (event) => event;
+export { load };
+export const actions = { x: async (event) => event };
+`,
+    'src/routes/c/+server.ts': `
+export async function GET(event) { return event; }
+export const load = (event) => event;
+`,
+    'src/lib/server/cache.server.ts': `
+export async function load(key: string) { return key; }
+`,
+  });
+
+  it('only SvelteKit route exports become endpoints', () => {
+    const eps = d.packages
+      .flatMap((p) => (p.endpoints ?? []) as Array<Record<string, unknown>>)
+      .map((e) => String(e.name))
+      .sort();
+    expect(eps).toEqual([
+      'GET src/routes/c',
+      'actions.default src/routes/a',
+      'actions.save src/routes/a',
+      'load src/routes/b',
+    ]);
+  });
+
+  it('a function that is not an endpoint has no untrusted param', () => {
+    for (const s of [
+      'routes/a/+page.server.ts:load',
+      '+page.server.ts:actionsLog',
+      '+page.server.ts:actions.save.$ret',
+      '+layout.server.ts:actions.x',
+      '+server.ts:load',
+      'cache.server.ts:load',
+    ]) {
+      expect(fn(d, s).sourceParams, s).toEqual([]);
+    }
+    expect(fn(d, '+page.server.ts:actions.save').sourceParams).toEqual([0]);
+  });
+});
+
+describe('class method names', () => {
+  const d = extract({
+    'src/lib/repo.ts': `
+export class UserRepo {
+  #where(id: string) { return id; }
+  'find-by-name'(n: string) { return n; }
+  42() { return 1; }
+  ['by-id'](x: string) { return x; }
+  [Symbol.iterator]() { return [][Symbol.iterator](); }
+  constructor(private db: unknown) {}
+  find(id: string) { return this.#where(id); }
+}
+`,
+  });
+
+  it('keeps private, quoted, numeric and literal computed names', () => {
+    const names = d.functions
+      .map((f) => String(f.fqn))
+      .filter((q) => q.includes(':UserRepo.'))
+      .map((q) => q.slice(q.indexOf(':') + 1))
+      .sort();
+    expect(names).toEqual([
+      'UserRepo.#where',
+      'UserRepo.42',
+      'UserRepo.[computed]',
+      'UserRepo.by-id',
+      'UserRepo.constructor',
+      'UserRepo.find',
+      'UserRepo.find-by-name',
+    ]);
+  });
+
+  it('a call to a private method binds to it', () => {
+    const c = callsites(fn(d, 'UserRepo.find')).filter((x) =>
+      String(x.calleeFqn).endsWith(':UserRepo.#where'),
+    );
+    expect(c).toHaveLength(1);
+    expect(c[0]!.opaque).toBe(false);
+  });
+});
+
 describe('svelte template lowering', () => {
   const d = extract({
     'src/routes/x/+page.svelte': `<script lang="ts">
