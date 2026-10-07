@@ -60,9 +60,9 @@ function isRange(v: unknown): v is Range {
 }
 
 /**
- * Returns the lowered TS source for a .svelte file plus the offset in the
- * lowered text at which the instance script begins (spans stay approximate;
- * they are reporting-only in CGF).
+ * Returns the lowered TS source for a .svelte file and `map`, which maps an
+ * offset in it back to the .svelte file. When the file cannot be parsed, `code`
+ * is empty and `warn` says why.
  */
 export function lowerSvelte(src: string): { code: string; warn?: string; map?: SvelteMap } {
   let ast: unknown;

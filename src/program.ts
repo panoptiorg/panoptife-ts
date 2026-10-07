@@ -1,12 +1,13 @@
-// A `ts.Program` over the repo's OWN sources only (a deliberate deviation).
+// A `ts.Program` over the repo's OWN sources, plus, when the target has a
+// `node_modules`, the `.d.ts` files of its dependencies (never their JS).
 //
-// The design constraint stays: the target repo has NO `node_modules`. We get a
-// real binder/checker anyway by owning module resolution ourselves —
-// `resolveModuleNameLiterals` maps a specifier to a repo-relative file with the
-// same rules the syntactic resolver used (relative, `tsconfig.paths`,
-// `kit.alias`, index/extension candidates) and returns `undefined` for anything
-// outside the repo. An unresolved import therefore has no symbol at all, which
-// is exactly the "stays opaque" contract.
+// The target's `node_modules` is optional. We get a real binder/checker either
+// way by owning module resolution ourselves — `resolveModuleNameLiterals` maps
+// a specifier to a repo-relative file with the same rules the syntactic
+// resolver uses (relative, `tsconfig.paths`, `kit.alias`, index/extension
+// candidates). Without `node_modules` it returns `undefined` for anything
+// outside the repo, so an unresolved import has no symbol at all, which is
+// exactly the "stays opaque" contract (typed mode: see `optionsFor`).
 //
 // `.svelte` files enter the program as in-memory units under a virtual
 // `<file>.svelte.__pc.ts` name carrying `svelte.ts`'s lowered script; the
@@ -14,7 +15,8 @@
 // modules included) and module resolution never has to guess it because we
 // resolve `./Foo.svelte` to it explicitly.
 //
-// No lib, no @types, no JSON: the checker's job here is symbol resolution
+// Untyped mode loads no lib, no @types, no JSON; typed mode loads the real lib
+// and @types (still no JSON). Either way the checker's job is symbol resolution
 // (aliases, re-exports, object-literal properties), not type correctness.
 import * as fs from 'node:fs';
 import * as path from 'node:path';

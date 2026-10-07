@@ -1,6 +1,6 @@
 // Repo layout: source walk, path aliases, git commit, schema location.
-// Everything is derived syntactically — the target repo has NO node_modules
-// (that is the design constraint), so `svelte.config.js` is parsed,
+// Everything here is derived syntactically and works without the target's
+// node_modules (the walk skips it): `svelte.config.{js,ts,mjs}` is parsed,
 // never executed.
 import * as fs from 'node:fs';
 import * as path from 'node:path';

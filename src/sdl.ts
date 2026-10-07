@@ -1,6 +1,7 @@
 // The GraphQL schema snapshot plays the role `.proto` plays for gRPC: the
 // shared contract that tells the client which parent type a selection sits on
-// and what the SDL arg names are. Only the AST is walked (`parse`), never
+// (SDL arg names are recorded but unused: emitted `arg_names` come from the
+// operation document, in document order). Only the AST is walked (`parse`), never
 // `buildSchema` — a real federated schema snapshot is ~13 MB and validation would cost
 // more than the whole extraction budget.
 import { parse, Kind, type DocumentNode, type TypeNode } from 'graphql';

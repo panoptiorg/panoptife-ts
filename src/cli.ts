@@ -4,6 +4,7 @@
 //                  [--adapter <name>]… [--no-adapters] [--no-adapter-routes]
 //                  [--no-library-writeback]
 //                  [--top-opaque N] [--json-stats <file>] [--quiet]
+//                  [--resolver checker|syntactic] [--no-type-anchors]
 import * as fs from 'node:fs';
 import { listAdapters } from './adapter.js';
 import { build } from './analyze.js';
@@ -11,7 +12,7 @@ import { loadCodec } from './cgf.js';
 
 function usage(): never {
   process.stderr.write(
-    'usage: pc-fe-ts build --repo <dir> --out <dir> [--repo-id <id>] [--schema <path>]\n' +
+    'usage: pc-fe-ts build --repo <dir> --out <dir> [--repo-id <id>] [--schema <path>]…\n' +
       '                     [--adapter <name>]… [--no-adapters] [--no-adapter-routes]\n' +
       '                     [--no-library-writeback]\n' +
       '                     [--top-opaque <n>] [--json-stats <file>] [--quiet]\n' +

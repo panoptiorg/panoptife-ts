@@ -9,7 +9,8 @@
 //   key = ["a", "b"]                       (arrays of the above, one line)
 //   [[table]]                              (array of tables; scalars/arrays only)
 //
-// NOT supported (and rejected loudly, so a typo is never silently ignored):
+// NOT supported (and rejected loudly, so unsupported syntax is never misread;
+// a misspelled key is valid syntax and is ignored):
 // `[table]`, nested/dotted keys, inline tables, multi-line arrays, datetimes.
 // The adapter schema is designed to stay inside this subset.
 

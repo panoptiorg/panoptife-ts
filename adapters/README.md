@@ -4,7 +4,8 @@ An adapter is a TOML file that tells `pc-fe-ts` how a client library turns a
 GraphQL document into something the application calls. The extractor itself
 knows TypeScript, Svelte and SvelteKit's file conventions, but no client
 library: with `--no-adapters` it finds no GraphQL operations at all. A test
-(`test/adapter.test.ts`) checks that no client-library name appears in `src/`.
+(`test/adapter.test.ts`) checks that none of the `bff-gateway` example's names
+(such as `getClientHandler` or `GatewayEndpoint`) appear in `src/`.
 
 ## Selecting adapters
 

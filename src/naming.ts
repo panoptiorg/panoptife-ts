@@ -1,8 +1,9 @@
 // callee_fqn naming. The catalog matches on this string, so it is the whole
-// policy surface of the TS frontend. Without the target repo's node_modules
-// there are no real types, so naming is syntactic:
+// policy surface of the TS frontend. Naming is syntactic whether or not the
+// target repo has node_modules:
 //   - a call on an imported symbol      -> "<module>.<name>"
 //   - a call on a receiver we recognise -> "<Type>.<method>"  (URLSearchParams.get)
+//   - a call on an unrecognised `x.<p>` -> "<p>.<method>"     (items.push)
 //   - anything else                     -> ".<method>"        (the flow model)
 import ts from 'typescript';
 

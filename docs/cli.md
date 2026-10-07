@@ -25,7 +25,7 @@ exits 2.
 | `--no-adapter-routes` | off | Do not generate HTTP endpoints from adapter `[[handler]] route` templates. |
 | `--no-library-writeback` | off | Disable library write-back (see [how-it-works.md](how-it-works.md#library-write-back)). |
 | `--resolver checker\|syntactic` | `checker` | `syntactic` skips the TypeScript program and resolves through import tables only. It exists for comparison; it resolves less. Any other value exits 2. |
-| `--no-type-anchors` | off | Disable type anchors (typed mode only). |
+| `--no-type-anchors` | off | Disable type anchors (made only by the `checker` resolver; see [how-it-works.md](how-it-works.md#the-typescript-program-and-call-resolution)). |
 | `--top-opaque <n>` | `0` | After the summary, print the `n` most frequent unresolved `callee_fqn` values. `0` prints nothing. |
 | `--json-stats <file>` | off | Write run statistics as JSON: the summary counters, the full opaque-callee histogram (sorted by count) and up to 200 warnings. |
 | `--quiet` | off | Suppress the first progress line. The summary line and `warning:` lines are always printed. |
@@ -83,16 +83,20 @@ repository's `node_modules` was used.
 Two conditions add a `warning:` line (these do not change the exit code):
 
 - No adapter was loaded (and `--no-adapters` was not given), but the repository
-  looks like it uses GraphQL: a dependency or import specifier, or a
-  `.graphql`/`.gql` file, whose name matches `graphql`, `apollo`, `urql` or
-  `relay`. Pass `--adapter <name>` or write an adapter.
+  looks like it uses GraphQL: a dependency or import specifier whose name
+  matches `graphql`, `apollo`, `urql` or `relay`, or any `.graphql`/`.gql`
+  file. Pass `--adapter <name>` or write an adapter.
 - Zero endpoints and zero operations were emitted. Nothing in the repository is
   an input surface the tool recognises, so no chain can start there.
+
+Two other lines can appear: `schema-warn:` when a schema file does not parse
+(it is skipped), and `proto-warn:` when the loaded `cgf.proto` has no
+`CallSite.arg_names` (GraphQL calls are then written without argument names).
 
 ## Exit codes
 
 | code | meaning |
 |---|---|
 | 0 | Success, including empty output and a `--repo` directory that does not exist (0 files, plus the second warning above). |
-| 1 | Fatal error: unknown adapter, malformed adapter file, `proto/cgf.proto` not found, a message that fails protobuf verification (these print a stack trace), or `dist/` not built (one-line hint). |
+| 1 | Fatal error: unknown adapter, malformed adapter file, a `--schema` file that cannot be read, `proto/cgf.proto` not found, a message that fails protobuf verification (these print a stack trace), or `dist/` not built (one-line hint). |
 | 2 | Usage error. |
