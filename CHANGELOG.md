@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.0](https://github.com/panoptiorg/panoptife-ts/compare/v0.1.1...v0.2.0) (2026-10-08)
+
+
+### Features
+
+* React and Next.js support, HTTP routes and client calls ([#4](https://github.com/panoptiorg/panoptife-ts/issues/4)) ([11379c3](https://github.com/panoptiorg/panoptife-ts/commit/11379c39c894b3466c2bd72c9f9cea12d0e1cf9e))
+
 ## [0.1.1](https://github.com/panoptiorg/panoptife-ts/compare/v0.1.0...v0.1.1) (2026-10-07)
 
 
