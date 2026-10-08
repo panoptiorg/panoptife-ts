@@ -1,11 +1,13 @@
 # Adapters
 
 An adapter is a TOML file that tells `pc-fe-ts` how a client library turns a
-GraphQL document into something the application calls. The extractor itself
-knows TypeScript, Svelte and SvelteKit's file conventions, but no client
-library: with `--no-adapters` it finds no GraphQL operations at all. A test
-(`test/adapter.test.ts`) checks that none of the `bff-gateway` example's names
-(such as `getClientHandler` or `GatewayEndpoint`) appear in `src/`.
+GraphQL document into something the application calls, or what a UI library's
+hooks and wrappers do with a value. The extractor itself knows TypeScript,
+Svelte, JSX, the SvelteKit and Next.js file conventions and the common HTTP
+clients, but no GraphQL client library: with `--no-adapters` it finds no
+GraphQL operations at all. A test (`test/adapter.test.ts`) checks that none of
+the `bff-gateway` example's names (such as `getClientHandler` or
+`GatewayEndpoint`) appear in `src/`.
 
 ## Selecting adapters
 
@@ -13,13 +15,15 @@ library: with `--no-adapters` it finds no GraphQL operations at all. A test
 pc-fe-ts build <repo> --out <dir>                                   # auto-detect
 pc-fe-ts build <repo> --out <dir> --adapter apollo --adapter felte  # exactly these
 pc-fe-ts build <repo> --out <dir> --no-adapters                     # none
+pc-fe-ts build <repo> --out <dir> --no-adapter react                # auto-detect, minus one
 ```
 
 Auto-detection loads every adapter whose `detect` list shares a name with the
 target's `package.json` `dependencies`, `devDependencies` or
 `peerDependencies`. `--adapter` replaces auto-detection and is repeatable. An
 adapter's `include` list is loaded first, depth-first; each adapter is loaded
-at most once.
+at most once. `--no-adapter <name>` (repeatable) keeps an adapter out even when
+it is detected or included.
 
 Adapters are looked up by file name (`--adapter apollo` reads
 `adapters/apollo.toml`) in the `adapters/` directory of the installed package.
@@ -34,6 +38,7 @@ There is no flag for another directory: to add an adapter, put the file there.
 | `tanstack-query` | `@tanstack/query-core` and the Svelte, React, Vue and Solid packages | callbacks stored by `createMutation`, `createQuery`, `fetchQuery`, `useMutation`; `mutationFn` invoked by `mutate`/`mutateAsync`, `queryFn` by `refetch` |
 | `felte` | `felte`, `@felte/core`, `@felte/svelte`, `@felte/react` | `createForm({ onSubmit })` invoked by `handleSubmit` |
 | `bff-gateway` | `@acme/gateway`, `@acme/mf-core` (placeholder names) | an example in-house gateway; includes `tanstack-query` and `felte` |
+| `react` | `react`, `react-dom` | `useState`/`useReducer` setters write into their state, `useMemo` returns its callback's result, `startTransition` runs its callback; `forwardRef`, `useCallback` and `lazy` are identity wrappers |
 
 `apollo`'s `mutate` and `query` rules match any `.mutate(...)` or `.query(...)`
 call, but only apply when the named argument resolves to a document.
@@ -135,6 +140,16 @@ resolves applies. If none does, the call is resolved normally. This is how
 |---|---|---|
 | `[[source]]` | `call`, `fqn` (both required) | A plain call `call(...)` is emitted as a zero-argument call named `fqn`, e.g. `read:route.params`, for the core's catalog to treat as a source. |
 | `[[identity_hof]]` | `name` (required) | A wrapper that returns the function it was given, so `const v = wrap(fn)` makes `v(...)` a call of `fn`. `debounce`, `throttle`, `memoize`, `memo` and `once` are built in. Do not list wrappers that change behaviour. |
+
+### `[[state_hook]]` and `[[thunk_hof]]`
+
+| table | keys | meaning |
+|---|---|---|
+| `[[state_hook]]` | `name` (required), `state` (default 0), `setter` (default 1) | A hook returning a tuple with a state value and its setter: `const [s, setS] = useState(…)`. In the function that destructures it (closures included), `setS(v)` flows `v` into `s`, and `setS(prev => f(prev))` flows `s` into `prev` and `f`'s result into `s`. The indices are the tuple positions. |
+| `[[thunk_hof]]` | `name` (required), `fn_arg` (default 0) | A call that runs the function at argument `fn_arg` and returns its result: `useMemo(() => e, deps)` is `e`. Only an inline function argument is followed. Do not list it as an `[[identity_hof]]`: it does not return the function. |
+
+`adapters/react.toml` uses both; see
+[../docs/how-it-works.md](../docs/how-it-works.md#jsx-and-react).
 
 ### Parsed keys with no effect
 

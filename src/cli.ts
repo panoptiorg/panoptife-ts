@@ -1,8 +1,9 @@
 // pc-fe-ts — TypeScript/Svelte CGF frontend.
 //
 //   pc-fe-ts build --repo <dir> [--repo-id <id>] [--schema <path>]… --out <dir>
-//                  [--adapter <name>]… [--no-adapters] [--no-adapter-routes]
-//                  [--no-library-writeback]
+//                  [--adapter <name>]… [--no-adapter <name>]… [--no-adapters] [--no-adapter-routes]
+//                  [--no-library-writeback] [--no-jsx] [--no-jsx-components] [--no-jsx-facts]
+//                  [--no-http-routes] [--no-http-calls] [--no-try-blocks] [--no-instance-names]
 //                  [--top-opaque N] [--json-stats <file>] [--quiet]
 //                  [--resolver checker|syntactic] [--no-type-anchors]
 import * as fs from 'node:fs';
@@ -13,8 +14,11 @@ import { loadCodec } from './cgf.js';
 function usage(): never {
   process.stderr.write(
     'usage: pc-fe-ts build --repo <dir> --out <dir> [--repo-id <id>] [--schema <path>]…\n' +
-      '                     [--adapter <name>]… [--no-adapters] [--no-adapter-routes]\n' +
-      '                     [--no-library-writeback]\n' +
+      '                     [--adapter <name>]… [--no-adapter <name>]… [--no-adapters]\n' +
+      '                     [--no-adapter-routes]\n' +
+      '                     [--no-library-writeback] [--no-jsx] [--no-jsx-components] [--no-jsx-facts]\n' +
+      '                     [--no-http-routes] [--no-http-calls] [--no-try-blocks]\n' +
+      '                     [--no-instance-names]\n' +
       '                     [--top-opaque <n>] [--json-stats <file>] [--quiet]\n' +
       '                     [--resolver checker|syntactic] [--no-type-anchors]\n' +
       `\nknown adapters: ${listAdapters().join(', ') || '<none>'}\n` +
@@ -38,7 +42,15 @@ export function main(argv: string[]): void {
   let noAdapters = false;
   let libraryWriteback = true;
   let adapterRoutes = true;
+  let jsx = true;
+  let jsxComponents = true;
+  let jsxFacts = true;
+  let httpRoutes = true;
+  let httpCalls = true;
+  let tryBlocks = true;
+  let instanceNames = true;
   const adapters: string[] = [];
+  const excludeAdapters: string[] = [];
   const schemas: string[] = [];
   for (let i = 0; i < a.length; i++) {
     const k = a[i];
@@ -81,6 +93,11 @@ export function main(argv: string[]): void {
         adapters.push(v);
         i++;
         break;
+      case '--no-adapter':
+        if (!v) usage();
+        excludeAdapters.push(v);
+        i++;
+        break;
       case '--no-adapters':
         noAdapters = true;
         break;
@@ -89,6 +106,27 @@ export function main(argv: string[]): void {
         break;
       case '--no-library-writeback':
         libraryWriteback = false;
+        break;
+      case '--no-jsx':
+        jsx = false;
+        break;
+      case '--no-jsx-components':
+        jsxComponents = false;
+        break;
+      case '--no-jsx-facts':
+        jsxFacts = false;
+        break;
+      case '--no-http-routes':
+        httpRoutes = false;
+        break;
+      case '--no-http-calls':
+        httpCalls = false;
+        break;
+      case '--no-try-blocks':
+        tryBlocks = false;
+        break;
+      case '--no-instance-names':
+        instanceNames = false;
         break;
       case '--quiet':
         quiet = true;
@@ -112,9 +150,17 @@ export function main(argv: string[]): void {
     resolver,
     typeAnchors,
     adapters,
+    excludeAdapters,
     noAdapters,
     adapterRoutes,
     libraryWriteback,
+    jsx,
+    jsxComponents,
+    jsxFacts,
+    httpRoutes,
+    httpCalls,
+    tryBlocks,
+    instanceNames,
   });
   const top = [...stats.opaque.entries()]
     .sort((x, y) => y[1] - x[1] || (x[0] < y[0] ? -1 : 1))

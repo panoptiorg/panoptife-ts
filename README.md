@@ -2,17 +2,20 @@
 
 # panoptife-ts
 
-**The TypeScript and Svelte frontend for [Panopticode][core]: turns a SvelteKit app into code graph facts.**
+**The TypeScript, Svelte and React frontend for [Panopticode][core]: turns a SvelteKit, React or Next.js app into code graph facts.**
 
 [![CI](https://github.com/panoptiorg/panoptife-ts/actions/workflows/ci.yml/badge.svg)](https://github.com/panoptiorg/panoptife-ts/actions/workflows/ci.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
-`pc-fe-ts` reads a SvelteKit repository and writes CGF, the input of the
-[panopticode][core] taint engine. It covers the browser side of a system:
-where untrusted input enters the app, how it moves through the app's own code,
-and which GraphQL fields it is sent to. Each GraphQL call is named after its
-schema field, and the [Go frontend][go] names the matching resolver the same
-way, so the engine can follow a value from a Svelte page into a Go backend.
+`pc-fe-ts` reads a SvelteKit, React (including Next.js) or plain TypeScript
+repository and writes CGF, the input of the [panopticode][core] taint engine.
+It covers the browser side of a system and the routes a Node meta-framework
+serves: where untrusted input enters the app, how it moves through the app's
+own code, and which GraphQL fields and HTTP routes it is sent to. Each GraphQL
+call is named after its schema field and each HTTP call after its method and
+path, and the [Go frontend][go] names the matching resolver or route the same
+way, so the engine can follow a value from a page into a Go backend. Vue and
+Angular templates are not read.
 
 **Overview, diagrams and live examples: [panopti.org](https://panopti.org)**
 
@@ -53,9 +56,10 @@ findings stay inside the app.
 | | |
 |---|---|
 | [CLI](docs/cli.md) | every flag, schema discovery, adapter selection, exit codes |
-| [How it works](docs/how-it-works.md) | Svelte lowering, call resolution, endpoints, the GraphQL join, known gaps |
+| [How it works](docs/how-it-works.md) | Svelte lowering, JSX and React, call resolution, endpoints and routes, the GraphQL join, HTTP client calls, known gaps |
 | [Adapters](adapters/README.md) | the shipped adapters, and how to write one for your GraphQL client |
 | [fixtures/webapp](https://github.com/panoptiorg/panoptife-ts/tree/main/fixtures/webapp) | the example app used above |
+| [fixtures/reactapp](https://github.com/panoptiorg/panoptife-ts/tree/main/fixtures/reactapp), [fixtures/nextapp](https://github.com/panoptiorg/panoptife-ts/tree/main/fixtures/nextapp) | a React single-page app and a Next.js app |
 
 ## Contributions 
 Are welcome; see
@@ -67,7 +71,7 @@ Are welcome; see
 |---|---|
 | [panopticode][core] | the engine: joins CGF from many repositories and finds taint flows |
 | [panoptife-go][go] | Go frontend |
-| **panoptife-ts** | TypeScript and Svelte frontend (this repository) |
+| **panoptife-ts** | TypeScript, Svelte and React frontend (this repository) |
 
 [core]: https://github.com/panoptiorg/panopticode
 [go]: https://github.com/panoptiorg/panoptife-go

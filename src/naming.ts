@@ -76,6 +76,35 @@ export const ASSIGN_SINK_PROPS = new Set([
   'text',
 ]);
 
+/**
+ * coverage wave 1 §3.1 — intrinsic-element attributes that are sinks, as
+ * synthetic `jsx:` call sites (the `svelte:` template facts' React twin).
+ * react-dom 19 rewrites a `javascript:` URL in these to a throwing URL
+ * (`sanitizeURL`: `href`, `src`, `action`, `formAction`, `xlinkHref`, and `data`
+ * on `<object>` only); react-dom 18 only warns. Which runtime renders the element
+ * is a fact about the repo, so it is recorded in the NAME and the catalog decides
+ * the class: `jsx:attr:<name>` when the repo's react is >= 19,
+ * `jsx:attr-unsanitized:<name>` when it is older or unknown. `srcDoc` and
+ * `dangerouslySetInnerHTML` are never sanitised.
+ */
+export const JSX_URL_ATTRS = new Set(['href', 'src', 'action', 'formAction', 'xlinkHref']);
+
+/** the `jsx:` fact an attribute of an intrinsic `<tag>` is, or null */
+export function jsxFactName(tag: string, attr: string, reactSanitizesUrls: boolean): string | null {
+  if (attr === 'dangerouslySetInnerHTML') return 'jsx:html';
+  if (attr === 'srcDoc') return 'jsx:attr:srcDoc';
+  if (JSX_URL_ATTRS.has(attr) || (attr === 'data' && tag === 'object')) {
+    return reactSanitizesUrls ? `jsx:attr:${attr}` : `jsx:attr-unsanitized:${attr}`;
+  }
+  return null;
+}
+
+/** `<div>`, `<my-el>`, `<svg:rect>` are host elements; `<Child>`, `<a.B>` are values */
+export function isIntrinsicTag(tag: ts.JsxTagNameExpression): boolean {
+  if (ts.isJsxNamespacedName(tag)) return true;
+  return ts.isIdentifier(tag) && (/^[a-z]/.test(tag.text) || tag.text.includes('-'));
+}
+
 export const RUNE_ROOTS = new Set([
   '$state',
   '$derived',

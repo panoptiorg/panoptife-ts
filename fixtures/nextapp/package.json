@@ -1,0 +1,11 @@
+{
+  "name": "nextapp",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "next": "^16.0.0",
+    "pg": "^8.13.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  }
+}

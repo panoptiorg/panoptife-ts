@@ -10,11 +10,14 @@ affect the output. Source files are named in parentheses.
 
 (`src/repo.ts`)
 
-The walk starts at `src/` if the repository has one, otherwise at the root. It
-reads `.ts`, `.tsx`, `.js`, `.mjs` and `.svelte` files in sorted order and
-skips `node_modules`, `dist`, `build`, `coverage`, `.svelte-kit`, every other
-dot-directory, `.d.ts` files, `*.test.*` and `*.spec.*` files, `__tests__/`,
-`__mocks__/` and a top-level `tests/`.
+The walk starts at `src/` if the repository has one, otherwise at the root. In
+a Next.js repository (see [endpoints and routes](#endpoints-and-routes)) a
+top-level `app/` and `pages/` are walked as well, because Next.js serves them
+even when `src/` exists. It reads `.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`, `.cjs`
+and `.svelte` files in sorted order and skips `node_modules`, `dist`, `build`,
+`coverage`, `.svelte-kit`, every other dot-directory, `.d.ts` files, `*.test.*`
+and `*.spec.*` files, `__tests__/`, `__mocks__/` and a top-level `tests/`.
+(`--no-jsx` drops `.jsx` and `.cjs`.)
 
 Import aliases come from three places; the first declaration of a prefix wins:
 
@@ -44,6 +47,71 @@ Line numbers in the output are mapped back to the original `.svelte` file. The
 whole component becomes one function, `<file>:$script`. Component props passed
 to children, `{#each}` bindings and slots are not modelled. A file that fails
 to parse contributes no code and one warning.
+
+## JSX and React
+
+(`FnFlow.jsx` in `src/analyze.ts`, `adapters/react.toml`)
+
+Every `.tsx`, `.jsx` and `.js` file can hold JSX, and JSX is walked like any
+other expression: attribute values and `{…}` children are evaluated, and an
+inline handler such as `onClick={() => { location.href = q }}` is inlined into
+the component like any closure. Its return value is dropped, because React
+never hands a handler's return back. Three kinds of fact come out of an
+element:
+
+| JSX | emitted |
+|---|---|
+| `<Child a={x} {...rest}>{kid}</Child>` | a `STATIC` call of `Child`, resolved like a call of that name, with one argument: the props object. Attributes, spreads and children all flow into it (flow is not field-sensitive, so they are all one value). An unresolved tag keeps the name a call would get (`@mui/material.Button` for an import), or is `jsx:<Name>`. |
+| `<x dangerouslySetInnerHTML={{__html: e}}>` | a `jsx:html` call site whose argument is `e` |
+| `<x href={e}>`, also `src`, `action`, `formAction`, `xlinkHref`, and `data` on `<object>` | `jsx:attr:<name>` or `jsx:attr-unsanitized:<name>` (below) |
+| `<iframe srcDoc={e}>` | `jsx:attr:srcDoc` |
+
+A host element (`<div>`, `<a>`) is not a call, and an element's value carries
+nothing, a component's included: the component is called, but its result
+(markup) does not flow on, so a child does not taint the props of the parent
+that renders it. `{q}` as text is escaped by React and is no sink. An attribute fact is emitted
+only when the value is not a literal and not a function (`<form action={fn}>`
+is a React 19 form action, not a URL). Like the `assign:` sites, a fact has one
+argument and no result.
+
+React 19 (react-dom 19.x `sanitizeURL`) replaces a `javascript:` URL in `href`,
+`src`, `action`, `formAction`, `xlinkHref` and `<object data>` with one that
+throws; React 18 only warned. Which runtime renders the page is a fact about
+the repository, so it is recorded in the name and the catalog decides the
+class: `jsx:attr:<name>` when the repository's `react` is 19 or later,
+`jsx:attr-unsanitized:<name>` when it is older or unknown. The version is the
+lowest major the `package.json` range allows (`^18.3.0 || ^19.0.0` counts as
+18); an installed `node_modules` is never read, so a commit extracts to the same
+bytes everywhere. `srcDoc` and `dangerouslySetInnerHTML` are never sanitised and
+have one name each.
+
+Components resolve through the checker exactly as calls do, including
+`memo(C)`, `React.memo(C)`, `memo(C, areEqual)`, `forwardRef(fn)`,
+`export default memo(function C…)` and `lazy(() => import('./C'))`, which
+resolves to `C`'s default export (or to `Named` for
+`import('./C').then((m) => ({ default: m.Named }))`). A known wrapper always wraps
+its first argument, never a later function such as a comparator.
+
+The `react` adapter (auto-detected from a `react` or `react-dom` dependency)
+adds what React does with a value inside one component:
+
+- `const [s, setS] = useState(…)`: every call `setS(v)` in the same function
+  (closures included) flows `v` into `s`; `setS(prev => f(prev))` reads `s` and
+  writes `f`'s result. A call is matched to the setter's declaration, so a
+  nested component's own `setS` or a local function that shadows the name
+  writes nothing into `s`. `useReducer`'s `dispatch(action)` flows the action into
+  the state; the reducer itself is not run.
+- `useMemo(() => e, deps)` returns `e`; `startTransition(fn)` runs `fn`.
+- `forwardRef`, `useCallback` and `lazy` are identity wrappers for call
+  resolution.
+
+Hook sources need no frontend support: `useSearchParams()` is an opaque call
+named `react-router.useSearchParams` (or `react-router-dom.…`,
+`next/navigation.…`), which the catalog marks as a source, and
+`const [sp] = useSearchParams()` carries its result into `sp`. Note that the
+naming is syntactic: `sp.get('q')` is named
+`react-router.useSearchParams.$ret.sp.get` after the variable, and `axios.get`
+is `.get`.
 
 ## The TypeScript program and call resolution
 
@@ -83,7 +151,14 @@ these hops are followed by hand:
   top-level code;
 - identity-preserving wrappers (`debounce`, `throttle`, `memoize`, `memo`,
   `once`, plus adapter `[[identity_hof]]` names) resolve to the wrapped
-  function.
+  function, also behind `export default` (`export default memo(C)`); a wrapper
+  around an import thunk (`lazy(() => import('./C'))`) resolves to that module's
+  default export. A top-level `const X = wrap(function …)` or
+  `export default wrap(function …)` is itself the wrapped function: for a
+  known identity wrapper only an inline first argument counts, and for any
+  other call the first inline function argument counts unless the first
+  argument is already a function reference (`rateLimit(handler, (r) => r.ip)`
+  wraps `handler`).
 
 A function emitted standalone this way also stays inlined in its parent, so
 closures keep working in both places. `--resolver syntactic` skips the program
@@ -107,35 +182,92 @@ core's catalog matches against:
 |---|---|
 | `<module>.<name>` for an import | `$app/navigation.goto` |
 | `<Type>.<method>` for a known receiver | `URLSearchParams.get`, `Map.set` |
+| `<module>.<Class>.<method>` on an instance of an imported class | `pg.Pool.query` for `pool.query(q)`, `pool = new Pool()` with `Pool` from `pg`, in this or another file |
 | `<prop>.<method>` for a property receiver of no known type | `items.push` (for `this.items.push(x)`) |
 | `.<method>` for any other unknown receiver | `.push` |
 | `read:<path>` for an input read | `read:$page.url`, `read:location.search`, `read:route.params` (for `$page.params`) |
 | `assign:<prop>` for a DOM write | `assign:innerHTML` |
 | `svelte:html`, `svelte:bind`, `svelte:tpl` | template constructs |
+| `jsx:html`, `jsx:attr:<name>`, `jsx:attr-unsanitized:<name>` | JSX host-element sinks ([JSX and React](#jsx-and-react)) |
+| `jsx:<Name>` | a component element whose tag does not resolve |
+| `http:<METHOD> <path>` | an HTTP client request ([HTTP client calls](#http-client-calls)); `*` when the method is unknown |
 | `graphql:<Type>.<field>` | remote GraphQL field |
 | `<pkg>.<factory>.$ret` | result of a non-identity external factory |
 
 Svelte 5 runes keep their names (`$state`, `$derived.by`), and `$props()` is a
 zero-argument call named `read:page.data`.
 
-## Endpoints
+## Endpoints and routes
 
-(`endpointNameFor` in `src/analyze.ts`)
+(`endpointNameFor` in `src/analyze.ts`, `src/routes.ts`)
 
 These SvelteKit exports become HTTP endpoints: `load` in `+page.server.ts` and
 `+layout.server.ts`, each member of `actions` in `+page.server.ts`
 (`actions.default`), and `GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `HEAD` and
-`OPTIONS` in `+server.ts` (the `.js` forms too). An endpoint is named
-`"<export> <directory>"` (`load src/routes/search`), where the directory is the
-file's repository-relative directory, not a URL. The function gets `binds_to`
-pointing at the endpoint and `source_params = [0]`: its first parameter is
-untrusted. Only exports under their own name count (`export function`,
-`export const`, `export { load }`); a rename such as `export { handler as GET }`
-is not followed. Any other file is never an endpoint: `+page.ts`,
-`+layout.ts`, components, and server-only modules such as
-`src/lib/db.server.ts`. Adapters can add endpoints through a `route` template, which also
-names them (`POST /api/{path}` gives `POST /api/search` in `fixtures/webapp`);
-`--no-adapter-routes` turns those off.
+`OPTIONS` in `+server.ts` (the `.js` forms too). A `load` or action endpoint is
+named `"<export> <directory>"` (`load src/routes/search`), where the directory
+is the file's repository-relative directory, not a URL. The function gets
+`binds_to` pointing at the endpoint and `source_params = [0]`: its first
+parameter is untrusted. Only exports under their own name count
+(`export function`, `export const`, `export { load }`). Any other file is never
+an endpoint: `+page.ts`, `+layout.ts`, components, and server-only modules
+such as `src/lib/db.server.ts`. Adapters can add endpoints through a `route`
+template, which also names them (`POST /api/{path}` gives `POST /api/search` in
+`fixtures/webapp`); `--no-adapter-routes` turns those off.
+
+### Route files
+
+A route file is served at a URL its path determines, so its handlers become
+routes. One table holds every convention the tool knows:
+
+| convention | file | handlers | method | request params |
+|---|---|---|---|---|
+| SvelteKit | `src/routes/**/+server.{ts,js}` | verb exports | the verb | `[0]` (event) |
+| Next.js App Router | `app/**/route.*` (or `src/app/…`) | verb exports, also `export { h as GET }` | the verb | `[0, 1]` (request, context) |
+| Next.js Pages API | `pages/api/**` (or `src/pages/api/…`) | the default export | `*` (any) | `[0]` (req) |
+| Next.js page | `app/**/page.*` | the default export | `GET` | `[0]` (`params`, `searchParams`) |
+
+The default export is followed through `export default handler`,
+`export { handler as default }` and a wrapper around a local handler
+(`export default withAuth(handler)`; among several local functions handed to
+the wrapper, the one with the handler's parameter count wins).
+
+The URL comes from the directory: SvelteKit's under `src/routes`, Next.js's
+under `app`/`pages`. A `(group)` segment and a Next.js `@slot` are dropped; a
+Next.js `_private` folder and an intercepting route (`(.)photo`) are not
+routable; `%5F` is a literal `_`; `index` is dropped from a Pages API file.
+When both a root `app/` and `src/app/` exist, Next.js serves only the root one,
+so `src/app/` files get no routes (the same for `pages/` and `src/pages/`).
+`/api/users/[id]` is the display form; the route is keyed on the canonical
+template (`/api/users/{}`; `[...x]` and `[[...x]]` become `{*}`), the form every
+Panopticode frontend and the engine share.
+
+Each route produces:
+
+- an endpoint with `kind = HTTP`, untrusted input, name `<METHOD> <display>`
+  (`GET /api/users/[id]`), whose identifier is the route's contract identifier
+  `ContractIID("http:<METHOD> <canonical path>")`: the same key a client call to
+  that URL carries, in any repository and any language;
+- an `HttpRoute` with that identifier, method, canonical path, display path,
+  the handler's identifier, the request parameters and the convention name
+  (`sveltekit`, `next-app`, `next-pages-api`, `next-page`);
+- on the handler, `binds_to` that endpoint and `source_params` the request
+  parameters. Next.js 15 and later pass `params` and `searchParams` as
+  Promises; `await` is transparent to the flow, so `const { id } = await params`
+  carries the taint.
+
+Next.js server actions are endpoints but not routes: a client component calls
+one by importing it, which already resolves to a `STATIC` call. Every exported
+function of a module that starts with `'use server'`, and every function whose
+body starts with it (a nested one is emitted as `<parent>.$<name>` for this),
+gets an endpoint named `action:<file>:<symbol>` and all of its parameters as
+`source_params`.
+
+The Next.js conventions and server actions apply only when the repository looks
+like Next.js: a `next` dependency in `package.json` or a `next.config.*` at its
+root. An `app/` folder in any other repository means nothing. `--no-http-routes`
+turns all of this off; SvelteKit `+server` verbs then keep the
+`"<export> <directory>"` endpoint they had before.
 
 ## GraphQL operations and the join with Go
 
@@ -171,6 +303,50 @@ form the example system;
 [The example system](https://github.com/panoptiorg/panopticode/blob/master/docs/example.md)
 maps their code to the 18 findings they produce.
 
+## HTTP client calls
+
+(`FnFlow.httpSite` in `src/analyze.ts`, `src/http.ts`)
+
+At a request made through `fetch` (also `window.fetch`), axios (`axios(…)`,
+`axios.get/post/put/patch/delete/head/options/request`, the `*Form` variants,
+and instances from `axios.create`), ky (`ky(…)`, `ky.get/…`, `ky.create`,
+`ky.extend`) or ofetch (`ofetch(…)`, `$fetch(…)`, `ofetch.create`), a second,
+synthetic call site is emitted next to the ordinary one:
+
+- `kind = STATIC`, opaque, one argument and no result;
+- `callee_fqn = "http:<METHOD> <path>"` and `http_call = {method, path}`;
+- every data argument of the request (the URL, the body, the options object)
+  flows into its argument.
+
+With no result the site is inert unless the engine links it to a route, so a
+repository whose calls match no route analyses as before. The ordinary call
+site keeps its name, so catalog rules on it still apply.
+
+Detection follows the binding of the callee, never its name: an import from
+`axios`, `ky` or `ofetch`, the global `fetch` or `$fetch` (not a local or a
+parameter of that name), or a variable initialised by a client's factory, in
+the same file or imported from another (`export const api = axios.create(…)`,
+then `api.get(…)`). The name alone could not tell them apart: `axios.get`,
+`ky.get` and `api.get` are all named `.get`.
+
+The path is recovered from string and template literals (each `${…}` is `{}`),
+`+` concatenation and `new URL(path, base)`. A `${…}` or operand is replaced by
+its value when the checker knows it as one string (`const BASE = '/api'`), and
+a local `const url = …` by its initialiser. `import.meta.env.*`,
+`process.env.*` and any other unknown value become `{}`, so an unknown base
+URL becomes the leading `{}` segment: `` fetch(`${API}/users/${id}`) `` is
+`GET /{}/users/{}`. A base URL (`baseURL`; `prefixUrl`, `prefix`, `baseUrl` for
+ky) is prepended, also to a path starting with `/` (as axios does), from the
+first of: the request's own config, the instance's config
+(`axios.create(cfg)`, through a `const` config and spreads), and a repository-wide
+`axios.defaults.baseURL = …`. A base the code sets but the tool cannot read (a
+computed value, a config object it cannot see) is `{}`, never dropped. A path
+that does not start with `/` and has no base (`ky.get('users')`) is relative to
+something unseen, so it also gets the leading `{}`.
+The result is canonicalised (no scheme, host, query or fragment). The method is
+the verb, or the `method` of the options or config object (`GET` when there is
+none, unknown when the object is not a literal).
+
 ## Flow extraction
 
 (`src/flow.ts`)
@@ -178,7 +354,9 @@ maps their code to the 18 findings they produce.
 Inside a function, flow is a name-based value graph: an assignment, a member
 read, an object or array literal, `await`, `?.` and spread all carry taint, and
 any part of a tainted object taints the whole (no field sensitivity). The graph
-is flow-insensitive within one function. It is projected onto CGF vertices of
+is flow-insensitive within one function. Every statement is walked, including
+the bodies of `try`, `catch` and `finally` (`--no-try-blocks` restores the
+earlier walk, which skipped `try` and `finally`). It is projected onto CGF vertices of
 four kinds: `IN_PARAM`, `CALL_ARG_PORT`, `CALL_RESULT_PORT`, `OUT_RETURN`. An
 edge is emitted from each source vertex to every sink vertex reachable from it;
 calls are barriers, so values reach a callee only through its argument ports.
@@ -211,8 +389,10 @@ Identifiers are SHA-256 over length-prefixed fields, byte-compatible with the
 Go extractor:
 
 - function `iid` = hash of (repo id, package, `<file>:<symbol>`, `"ts"`);
-- endpoint `iid` = hash of (repo id, `""`, endpoint name, `"http"`);
-- contract `iid` = hash of (`""`, `""`, contract name, `"grpc"`);
+- endpoint `iid` = hash of (repo id, `""`, endpoint name, `"http"`), except
+  for a route, whose endpoint `iid` is its contract `iid`;
+- contract `iid` = hash of (`""`, `""`, contract name, `"grpc"`), where the
+  contract name is `graphql:<Type>.<field>` or `http:<METHOD> <path>`;
 - `bid` = hash of the function's flow (including spans) and its callee
   identifiers, so moving a line changes `bid` but not `iid`.
 
@@ -232,6 +412,26 @@ own; see its [limitations](https://github.com/panoptiorg/panopticode/blob/master
   missing from the snapshot is skipped with a `graphql-warn` that shows only in
   the `warnings=` count and in `--json-stats`. With no schema, only root fields
   are joined.
+- React: the props object is one value, so one tainted prop taints every prop
+  a component reads. A setter passed down as a prop (`<Input onChange={setQ}/>`)
+  or as a callback (`.then(setUser)`) is not followed (the same gap as
+  `onChange?.(v)` below). Context (`createContext`/`useContext`) and stores
+  (Redux, Zustand) are not modelled, so taint does not cross them. Class
+  components are not resolved (`<Legacy/>` stays an opaque call), nor are a
+  wrapper of a wrapper (`memo(forwardRef(…))`) and a component declared inside
+  another one. `lazy(() => import('./X'))` also leaves a call into `X` in the
+  file's top-level code. React Router and other client-side route tables are
+  not endpoints.
+- Next.js: `layout.*`, `generateMetadata`, `getServerSideProps`,
+  `middleware.ts`/`proxy.ts` and an inline action
+  (`action={async () => { 'use server'; … }}`) are not modelled. A verb
+  exported as a wrapper call (`export const GET = withAuth(handler)`) gets no
+  route, and a renamed export of a `'use server'` module is no action. An
+  optional catch-all (`[[...slug]]`) gives one route, `{*}`.
+- HTTP clients: only `fetch`, axios, ky and ofetch are recognised (not
+  superagent, SWR keys or RTK Query endpoints), a URL built by a helper in
+  another file is `{}`, and a SvelteKit `load({ fetch })` parameter is not the
+  global `fetch`.
 - Flow inside a function is flow-insensitive and not field-sensitive: taint on
   any part of an object taints all of it, and a variable anywhere in a nested
   GraphQL input object taints the whole argument

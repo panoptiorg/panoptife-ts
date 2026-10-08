@@ -78,6 +78,16 @@ describe('empty-output guardrail warnings', () => {
     expect(warnings.some((w) => w.includes('GraphQL-shaped'))).toBe(false);
   });
 
+  it('(b) does not claim "no chains": a browser app still has catalog sources', () => {
+    const lines = captureStderr(() => {
+      extractDir(path.resolve(HERE, '..', 'fixtures', 'reactapp'), { repoId: 'reactapp' });
+    });
+    const w = warningsOf(lines).find((l) => l.includes('0 endpoints and 0 operations emitted'))!;
+    expect(w).toContain('no entry surface was recognised');
+    expect(w).toContain('chains can still start at catalog sources');
+    expect(w).not.toContain('no chains');
+  });
+
   it('warning (b) still prints under --quiet', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pc-fe-ts-quiet-'));
     fs.mkdirSync(path.join(dir, 'src', 'lib'), { recursive: true });
