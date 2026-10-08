@@ -8,6 +8,10 @@ import { execFileSync } from 'node:child_process';
 import ts from 'typescript';
 
 const SRC_EXT = new Set(['.ts', '.tsx', '.js', '.mjs', '.svelte']);
+/** coverage wave 1 §3.1: React code also lives in `.jsx`, and CommonJS
+ *  modules in `.cjs`. Joined to the walk with JSX on (`--no-jsx` keeps the
+ *  previous walk byte for byte). */
+const SRC_EXT_JSX = new Set([...SRC_EXT, '.jsx', '.cjs']);
 const SKIP_DIR = new Set([
   'node_modules',
   '.git',
@@ -30,6 +34,17 @@ export interface RepoInfo {
   /** src root (absolute) — package paths are relative to the repo dir */
   alias: Array<{ prefix: string; target: string }>;
   schemaPaths: string[];
+  /** `.tsx`/`.jsx` (and `index.tsx`/`index.jsx`) are import candidates — the
+   *  `--no-jsx` switch (coverage wave 1 §3.1) */
+  jsx: boolean;
+}
+
+export interface LoadOpts {
+  /** coverage wave 1 §3.1 — walk `.jsx`/`.cjs`, resolve imports to `.tsx`/`.jsx` */
+  jsx?: boolean;
+  /** coverage wave 1 §3.3 — top-level directories walked even when `src/`
+   *  exists (Next.js serves a root `app/`/`pages/` over `src/app`) */
+  extraRoots?: string[];
 }
 
 function isTestFile(rel: string): boolean {
@@ -42,7 +57,7 @@ function isTestFile(rel: string): boolean {
 }
 
 /** Deterministic depth-first walk with sorted entries. */
-export function walk(root: string, rel = ''): string[] {
+export function walk(root: string, rel = '', ext: ReadonlySet<string> = SRC_EXT): string[] {
   const out: string[] = [];
   const abs = rel ? path.join(root, rel) : root;
   let entries: fs.Dirent[];
@@ -56,9 +71,9 @@ export function walk(root: string, rel = ''): string[] {
     const r = rel ? `${rel}/${e.name}` : e.name;
     if (e.isDirectory()) {
       if (SKIP_DIR.has(e.name) || e.name.startsWith('.')) continue;
-      out.push(...walk(root, r));
+      out.push(...walk(root, r, ext));
     } else if (e.isFile()) {
-      if (!SRC_EXT.has(path.extname(e.name))) continue;
+      if (!ext.has(path.extname(e.name))) continue;
       if (e.name.endsWith('.d.ts')) continue;
       if (isTestFile(r)) continue;
       out.push(r);
@@ -181,7 +196,13 @@ export function findSchemas(dir: string, explicit: string[]): string[] {
   return out;
 }
 
-export function loadRepo(dir: string, repoId: string | undefined, schemas: string[]): RepoInfo {
+export function loadRepo(
+  dir: string,
+  repoId: string | undefined,
+  schemas: string[],
+  opts: LoadOpts = {},
+): RepoInfo {
+  const jsx = opts.jsx ?? true;
   const abs = path.resolve(dir);
   const alias: Array<{ prefix: string; target: string }> = [];
   const havePrefix = new Set<string>();
@@ -193,8 +214,13 @@ export function loadRepo(dir: string, repoId: string | undefined, schemas: strin
   // longest prefix first so `$gatewayService` beats `$g`
   alias.sort((a, b) => b.prefix.length - a.prefix.length || (a.prefix < b.prefix ? -1 : 1));
   const roots = fs.existsSync(path.join(abs, 'src')) ? ['src'] : [''];
+  if (roots[0] === 'src') {
+    for (const r of opts.extraRoots ?? []) {
+      if (fs.existsSync(path.join(abs, r)) && !roots.includes(r)) roots.push(r);
+    }
+  }
   const files: string[] = [];
-  for (const r of roots) files.push(...walk(abs, r));
+  for (const r of roots) files.push(...walk(abs, r, jsx ? SRC_EXT_JSX : SRC_EXT));
   files.sort();
   return {
     dir: abs,
@@ -203,6 +229,7 @@ export function loadRepo(dir: string, repoId: string | undefined, schemas: strin
     files,
     alias,
     schemaPaths: findSchemas(abs, schemas),
+    jsx,
   };
 }
 
@@ -236,6 +263,12 @@ export function resolveImport(
     base + '/index.js',
     base + '/index.svelte.ts',
   ];
+  // Appended, never interleaved: a specifier that resolved before resolves to
+  // the same file; only one that used to stay opaque (`./Child` -> Child.tsx)
+  // gains a target.
+  if (repo.jsx) {
+    cands.push(base + '.tsx', base + '.jsx', base + '/index.tsx', base + '/index.jsx');
+  }
   for (const c of cands) if (exists(c)) return c;
   return null;
 }

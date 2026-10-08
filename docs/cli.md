@@ -2,8 +2,11 @@
 
 ```text
 pc-fe-ts build [<repo>] --repo <dir> --out <dir> [--repo-id <id>] [--schema <path>]...
-               [--adapter <name>]... [--no-adapters] [--no-adapter-routes]
-               [--no-library-writeback]
+               [--adapter <name>]... [--no-adapter <name>]... [--no-adapters]
+               [--no-adapter-routes] [--no-library-writeback]
+               [--no-jsx] [--no-jsx-components] [--no-jsx-facts]
+               [--no-http-routes] [--no-http-calls] [--no-try-blocks]
+               [--no-instance-names]
                [--top-opaque <n>] [--json-stats <file>] [--quiet]
                [--resolver checker|syntactic] [--no-type-anchors]
 ```
@@ -21,9 +24,17 @@ exits 2.
 | `--repo-id <id>` | base name of the repo directory | Written to `CgfPackage.repo` and hashed into every function and endpoint identifier. Keep it stable across runs. |
 | `--schema <path>` | auto-discovered | GraphQL SDL file(s). Repeatable; paths are relative to the current directory. |
 | `--adapter <name>` | auto-detected | Load exactly these adapters (repeatable) instead of auto-detecting. |
+| `--no-adapter <name>` | off | Never load this adapter (repeatable), even when it is detected or another adapter includes it. `--no-adapter react` turns off the React hook and wrapper modelling. |
 | `--no-adapters` | off | Load no adapters at all. |
 | `--no-adapter-routes` | off | Do not generate HTTP endpoints from adapter `[[handler]] route` templates. |
 | `--no-library-writeback` | off | Disable library write-back (see [how-it-works.md](how-it-works.md#library-write-back)). |
+| `--no-jsx` | off | Do not walk JSX: attribute values and `{…}` children are skipped, `.jsx` and `.cjs` files are not read, and imports do not resolve to `.tsx`/`.jsx` files. Implies the next two. See [how-it-works.md](how-it-works.md#jsx-and-react). |
+| `--no-jsx-components` | off | Do not emit a call site for a component element (`<Child …/>`), and keep the earlier rules for which function a wrapper call (`const X = wrap(…)`, `export default wrap(…)`) stands for. |
+| `--no-jsx-facts` | off | Do not emit the `jsx:html` and `jsx:attr:*` call sites for host-element attributes. |
+| `--no-http-routes` | off | Do not treat route files as endpoints (SvelteKit `+server` files then keep their previous directory-named endpoint) and emit no `HttpRoute` and no server-action endpoints. See [how-it-works.md](how-it-works.md#endpoints-and-routes). |
+| `--no-http-calls` | off | Do not emit the synthetic `http:` call sites at HTTP client calls. See [how-it-works.md](how-it-works.md#http-client-calls). |
+| `--no-try-blocks` | off | Do not walk `try` and `finally` bodies (only `catch`), the behaviour before this flag existed. |
+| `--no-instance-names` | off | Name a method call on an instance of an imported class `.<method>` again, instead of `<module>.<Class>.<method>` (`pool.query` on `new Pool()` from `pg` is `pg.Pool.query`). See [how-it-works.md](how-it-works.md#functions-and-naming). |
 | `--resolver checker\|syntactic` | `checker` | `syntactic` skips the TypeScript program and resolves through import tables only. It exists for comparison; it resolves less. Any other value exits 2. |
 | `--no-type-anchors` | off | Disable type anchors (made only by the `checker` resolver; see [how-it-works.md](how-it-works.md#the-typescript-program-and-call-resolution)). |
 | `--top-opaque <n>` | `0` | After the summary, print the `n` most frequent unresolved `callee_fqn` values. `0` prints nothing. |
@@ -32,6 +43,10 @@ exits 2.
 
 A flag not in this table is a usage error (exit 2), with one quirk: if it comes
 before the repository has been named, it is taken as the repository path.
+
+Every flag from `--no-jsx` to `--no-instance-names`, and `--no-adapter react`,
+switches off one addition and restores the earlier output for it: with all of
+them, the output is byte-identical to the version before they existed.
 
 ## Schema discovery
 
@@ -50,6 +65,8 @@ an operation become remote calls, and each skipped deeper field produces a
 3. Otherwise every `adapters/*.toml` whose `detect` list intersects the target
    repository's `package.json` `dependencies`, `devDependencies` and
    `peerDependencies`.
+
+`--no-adapter <name>` removes a name from whichever of these sets applies.
 
 Adapters are read from the `adapters/` directory of the installed package;
 there is no flag to point at another directory. An unknown name is a fatal
@@ -80,18 +97,41 @@ pc-fe-ts: files=4 functions=9 callsites=16 invokes_remote=1 ops=1 gql_fields[sdl
 `invokes_remote` counts GraphQL remote calls; `typed` says whether the
 repository's `node_modules` was used.
 
+Before the summary, two census lines appear when there is something to count
+(not under `--quiet`):
+
+```text
+http-routes: 6 routes (next-app=3 next-page=2 next-pages-api=1) actions=1
+http-calls: 19 sites, resolved_path=19, dynamic_base=19, unknown_method=0
+```
+
+`http-routes` counts `HttpRoute` rows per convention and the server actions.
+`http-calls` counts the synthetic client sites: `resolved_path` those whose
+path has at least one literal segment, `dynamic_base` those whose path starts
+with an unresolved base (`/{}/…`), `unknown_method` those whose method could
+not be read. `--json-stats` has the same numbers (`httpRoutes`,
+`httpRoutesByFramework`, `serverActions`, `httpCalls`, `httpCallsResolvedPath`,
+`httpCallsDynamicBase`, `httpCallsUnknownMethod`), plus `jsxComponents`,
+`jsxComponentsResolved`, `jsxFacts`, `reactMajor` and `nextjs`.
+
 Two conditions add a `warning:` line (these do not change the exit code):
 
 - No adapter was loaded (and `--no-adapters` was not given), but the repository
   looks like it uses GraphQL: a dependency or import specifier whose name
   matches `graphql`, `apollo`, `urql` or `relay`, or any `.graphql`/`.gql`
   file. Pass `--adapter <name>` or write an adapter.
-- Zero endpoints and zero operations were emitted. Nothing in the repository is
-  an input surface the tool recognises, so no chain can start there.
+- Zero endpoints and zero operations were emitted: no entry surface (route
+  export, Next.js route file or server action, adapter handler route, GraphQL
+  operation) was recognised, so no chain starts at an endpoint of this
+  repository. Chains can still start at catalog sources in its code: a
+  browser-only app (`fixtures/reactapp`) prints this warning and still has
+  chains from `useSearchParams` and `location.*`.
 
 Two other lines can appear: `schema-warn:` when a schema file does not parse
 (it is skipped), and `proto-warn:` when the loaded `cgf.proto` has no
-`CallSite.arg_names` (GraphQL calls are then written without argument names).
+`CallSite.arg_names` (GraphQL calls are then written without argument names)
+or no `CgfPackage.http_routes`/`CallSite.http_call` (routes and HTTP client
+sites are then not emitted).
 
 ## Exit codes
 

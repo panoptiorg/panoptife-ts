@@ -37,7 +37,7 @@ export const CallKind = {
   BUILTIN: 5,
 } as const;
 
-export const EndpointKind = { GRPC: 0, GRAPHQL: 1, HTTP: 2 } as const;
+export const EndpointKind = { GRPC: 0, GRAPHQL: 1, HTTP: 2, MESSAGE: 3 } as const;
 
 export interface CgfCodec {
   encodePackage(pkg: unknown): Uint8Array;
@@ -45,6 +45,9 @@ export interface CgfCodec {
   hasArgNames: boolean;
   /** true when the loaded cgf.proto declares GraphqlField.args. */
   hasGraphqlArgs: boolean;
+  /** true when the loaded cgf.proto declares CgfPackage.http_routes and
+   *  CallSite.http_call (coverage wave 1); without them neither is emitted */
+  hasHttp: boolean;
   protoPath: string;
 }
 
@@ -85,10 +88,14 @@ export function loadCodec(protoPath?: string): CgfCodec {
     hasGraphqlArgs = false;
   }
   const hasArgNames = !!CallSite.fields['arg_names'] || !!CallSite.fields['argNames'];
+  const hasHttp =
+    (!!Pkg.fields['http_routes'] || !!Pkg.fields['httpRoutes']) &&
+    (!!CallSite.fields['http_call'] || !!CallSite.fields['httpCall']);
   return {
     protoPath: p,
     hasArgNames,
     hasGraphqlArgs,
+    hasHttp,
     encodePackage(pkg: unknown): Uint8Array {
       const err = Pkg.verify(pkg as Record<string, unknown>);
       if (err) throw new Error(`cgf verify: ${err}`);

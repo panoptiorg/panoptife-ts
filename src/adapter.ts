@@ -74,6 +74,21 @@ export interface InvokeRule {
   resultProp?: string;
 }
 
+/**
+ * A hook that returns `[state, setter]` (coverage wave 1 §3.2): in the
+ * function that destructures it, every call of the setter writes its argument
+ * into the state variable, and a functional update `set(prev => f(prev))` reads
+ * the state and writes `f`'s result. Name-based and same-function, which the
+ * flow-insensitive model makes exact for the local case.
+ */
+export interface StateHook {
+  name: string;
+  /** tuple index of the state variable */
+  state: number;
+  /** tuple index of the setter */
+  setter: number;
+}
+
 export interface Adapter {
   name: string;
   detect: string[];
@@ -85,6 +100,9 @@ export interface Adapter {
   handleMethods: Array<{ prop: string; methods: string[] }>;
   sources: Array<{ call: string; fqn: string }>;
   identityHofs: string[];
+  stateHooks: StateHook[];
+  /** calls that run their callback once and return ITS result (`useMemo`) */
+  thunkHofs: Array<{ name: string; fnArg: number }>;
 }
 
 /** The merged view analyze.ts consults. Empty == `--no-adapters`. */
@@ -103,6 +121,10 @@ export class AdapterSet {
   readonly handleMethods = new Map<string, string[]>();
   readonly routeSourceCalls = new Map<string, string>();
   readonly identityHofs = new Set<string>();
+  /** hook name -> its tuple layout (`[[state_hook]]`) */
+  readonly stateHooks = new Map<string, StateHook>();
+  /** callee name -> the argument holding the callback (`[[thunk_hof]]`) */
+  readonly thunkHofs = new Map<string, number>();
   /** `getSdk`-style factories -> the rule that declares them */
   readonly sdkFactories = new Map<string, HandlerRule>();
   /** true when some rule binds a callable to a DOCUMENT, so gql consts must be indexed */
@@ -140,6 +162,8 @@ export class AdapterSet {
     }
     for (const s of a.sources) this.routeSourceCalls.set(s.call, s.fqn);
     for (const h of a.identityHofs) this.identityHofs.add(h);
+    for (const h of a.stateHooks) this.stateHooks.set(h.name, h);
+    for (const h of a.thunkHofs) this.thunkHofs.set(h.name, h.fnArg);
   }
 
   get empty(): boolean {
@@ -177,6 +201,8 @@ export function parseAdapter(text: string, file: string): Adapter {
     handleMethods: [],
     sources: [],
     identityHofs: [],
+    stateHooks: [],
+    thunkHofs: [],
   };
   for (const t of doc.tables.get('operation') ?? []) {
     const w = `${file} [[operation]]`;
@@ -249,6 +275,18 @@ export function parseAdapter(text: string, file: string): Adapter {
     if (!nm) throw new Error(`${w}: name is required`);
     a.identityHofs.push(nm);
   }
+  for (const t of doc.tables.get('state_hook') ?? []) {
+    const w = `${file} [[state_hook]]`;
+    const nm = str(t, 'name', w);
+    if (!nm) throw new Error(`${w}: name is required`);
+    a.stateHooks.push({ name: nm, state: one(t, 'state', w, 0), setter: one(t, 'setter', w, 1) });
+  }
+  for (const t of doc.tables.get('thunk_hof') ?? []) {
+    const w = `${file} [[thunk_hof]]`;
+    const nm = str(t, 'name', w);
+    if (!nm) throw new Error(`${w}: name is required`);
+    a.thunkHofs.push({ name: nm, fnArg: one(t, 'fn_arg', w, 0) });
+  }
   // `include = [...]` is resolved by the loader, which knows the directory.
   return a;
 }
@@ -257,7 +295,8 @@ function adapterFile(dir: string, name: string): string {
   return path.join(dir, `${name}.toml`);
 }
 
-/** Read one adapter and everything its `include` names, depth-first. */
+/** Read one adapter and everything its `include` names, depth-first. An
+ *  excluded name (`--no-adapter`) is skipped wherever it is reached. */
 function loadOne(dir: string, name: string, set: AdapterSet, seen: Set<string>): void {
   if (seen.has(name)) return;
   seen.add(name);
@@ -322,6 +361,8 @@ export interface AdapterOpts {
   none?: boolean;
   /** `--no-adapter-routes` */
   routes?: boolean;
+  /** `--no-adapter <name>`: never load these, detected or included */
+  exclude?: string[];
   dir?: string;
 }
 
@@ -331,7 +372,8 @@ export function loadAdapters(o: AdapterOpts): AdapterSet {
   if (o.none) return set;
   const dir = o.dir ?? ADAPTERS_DIR;
   const names = o.adapters?.length ? o.adapters : autoDetect(o.repoDir, dir);
-  const seen = new Set<string>();
+  // pre-seeding `seen` makes loadOne skip an excluded adapter, also as an include
+  const seen = new Set<string>(o.exclude ?? []);
   for (const n of names) loadOne(dir, n, set, seen);
   return set;
 }

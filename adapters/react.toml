@@ -1,0 +1,31 @@
+# React — what the hooks and wrappers do with a value. Nothing here reaches
+# node_modules: each row tells the flow model how React moves a value between a
+# component's own variables (coverage wave 1 §3.2).
+name   = "react"
+detect = ["react", "react-dom"]
+
+# `memo(C)`, `forwardRef(C)` and `useCallback(fn, deps)` hand back the function
+# they were given (`memo` is also built in). `lazy(() => import('./X'))` is
+# walked through to X's default export, so `<X …/>` binds to the component.
+[[identity_hof]]
+name = "forwardRef"
+[[identity_hof]]
+name = "useCallback"
+[[identity_hof]]
+name = "lazy"
+
+# `useMemo(() => e, deps)` returns e, not the callback; `startTransition(fn)`
+# runs fn once. Neither hands its function back, so neither is an identity_hof.
+[[thunk_hof]]
+name = "useMemo"
+[[thunk_hof]]
+name = "startTransition"
+
+# `const [s, setS] = useState(init)`: `setS(v)` writes v into s, and
+# `setS(prev => f(prev))` reads s and writes f's result. `useReducer`'s
+# dispatch carries the action into the state the same way (the reducer itself
+# is not modelled). A setter passed to a child as a prop is not followed.
+[[state_hook]]
+name = "useState"
+[[state_hook]]
+name = "useReducer"

@@ -55,7 +55,8 @@ export interface RepoProgram {
 function scriptKindFor(rel: string, svelte: boolean): ts.ScriptKind {
   if (svelte) return ts.ScriptKind.TS;
   if (rel.endsWith('.tsx')) return ts.ScriptKind.TSX;
-  if (rel.endsWith('.js') || rel.endsWith('.mjs')) return ts.ScriptKind.JS;
+  if (rel.endsWith('.jsx')) return ts.ScriptKind.JSX;
+  if (rel.endsWith('.js') || rel.endsWith('.mjs') || rel.endsWith('.cjs')) return ts.ScriptKind.JS;
   return ts.ScriptKind.TS;
 }
 
@@ -160,7 +161,11 @@ export function createRepoProgram(repo: RepoInfo, units: SourceUnit[]): RepoProg
       if (rel) {
         return {
           resolvedFileName: virtualName(repo.dir, rel),
-          extension: rel.endsWith('.tsx') ? ts.Extension.Tsx : ts.Extension.Ts,
+          extension: rel.endsWith('.tsx')
+            ? ts.Extension.Tsx
+            : rel.endsWith('.jsx')
+              ? ts.Extension.Jsx
+              : ts.Extension.Ts,
           isExternalLibraryImport: false,
         };
       }

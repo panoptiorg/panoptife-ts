@@ -25,8 +25,16 @@ export interface ExtractOpts {
   /** adapters to load; default `['bff-gateway']`, `[]` means `--no-adapters` */
   adapters?: string[];
   noAdapters?: boolean;
+  excludeAdapters?: string[];
   adapterRoutes?: boolean;
   libraryWriteback?: boolean;
+  jsx?: boolean;
+  jsxComponents?: boolean;
+  jsxFacts?: boolean;
+  httpRoutes?: boolean;
+  httpCalls?: boolean;
+  tryBlocks?: boolean;
+  instanceNames?: boolean;
 }
 
 /** Write `files` into a temp repo, extract it, and decode the .pb back to JSON. */
@@ -56,8 +64,16 @@ export function extractDir(dir: string, o: ExtractOpts = {}): Decoded {
     quiet: true,
     adapters: o.adapters,
     noAdapters: o.noAdapters,
+    excludeAdapters: o.excludeAdapters,
     adapterRoutes: o.adapterRoutes,
     libraryWriteback: o.libraryWriteback,
+    jsx: o.jsx,
+    jsxComponents: o.jsxComponents,
+    jsxFacts: o.jsxFacts,
+    httpRoutes: o.httpRoutes,
+    httpCalls: o.httpCalls,
+    tryBlocks: o.tryBlocks,
+    instanceNames: o.instanceNames,
   });
   const root = protobuf.loadSync(c.protoPath);
   const Pkg = root.lookupType('panopticode.cgf.CgfPackage');
@@ -131,4 +147,37 @@ export const OUT_RETURN = 'OUT_RETURN';
 
 export function kindOf(v: Record<string, unknown>): string {
   return String(v.kind ?? 'IN_PARAM');
+}
+
+/** the first callsite of `f` whose callee_fqn is `fqn` (or ends with it, for `:sym` targets) */
+export function siteOf(f: Record<string, unknown>, fqn: string): Record<string, unknown> {
+  const c =
+    callsites(f).find((x) => String(x.calleeFqn) === fqn) ??
+    callsites(f).find((x) => String(x.calleeFqn).endsWith(fqn));
+  if (!c) {
+    throw new Error(
+      `no callsite ${fqn} in ${String(f.fqn)}; have ${callsites(f).map((x) => x.calleeFqn).join(', ')}`,
+    );
+  }
+  return c;
+}
+
+/** vertex predicate: an arg port (any index unless given) of callsite `cs` */
+export function argOf(cs: Record<string, unknown>, idx?: number) {
+  return (v: Record<string, unknown>): boolean =>
+    kindOf(v) === CALL_ARG_PORT &&
+    Number(v.callsiteId ?? 0) === Number(cs.id ?? 0) &&
+    (idx === undefined || Number(v.index ?? 0) === idx);
+}
+
+/** vertex predicate: the result port of callsite `cs` */
+export function resultOf(cs: Record<string, unknown>) {
+  return (v: Record<string, unknown>): boolean =>
+    kindOf(v) === CALL_RESULT_PORT && Number(v.callsiteId ?? 0) === Number(cs.id ?? 0);
+}
+
+/** vertex predicate: parameter `i` */
+export function param(i: number) {
+  return (v: Record<string, unknown>): boolean =>
+    kindOf(v) === IN_PARAM && Number(v.index ?? 0) === i;
 }

@@ -75,7 +75,7 @@ factories = ['getSdk']
 
   it('every shipped adapter parses', () => {
     const names = listAdapters(ADAPTERS);
-    expect(names).toEqual(['apollo', 'bff-gateway', 'felte', 'graphql-request', 'tanstack-query']);
+    expect(names).toEqual(['apollo', 'bff-gateway', 'felte', 'graphql-request', 'react', 'tanstack-query']);
     for (const n of names) {
       const a = parseAdapter(fs.readFileSync(path.join(ADAPTERS, `${n}.toml`), 'utf8'), n);
       expect(a.name).toBe(n);
@@ -91,6 +91,25 @@ factories = ['getSdk']
     expect(s.handlerFactories.has('getClientHandler')).toBe(true);
     expect(s.callbackFactories.has('createForm')).toBe(true);
     expect(s.handleMethods.get('mutationFn')).toEqual(['mutate', 'mutateAsync']);
+  });
+
+  it('reads [[state_hook]] and [[thunk_hof]] (coverage wave 1 §3.2)', () => {
+    const a = parseAdapter(
+      'name = "x"\n[[state_hook]]\nname = "useSignal"\nstate = 1\nsetter = 0\n[[thunk_hof]]\nname = "compute"\nfn_arg = 1\n',
+      't',
+    );
+    expect(a.stateHooks).toEqual([{ name: 'useSignal', state: 1, setter: 0 }]);
+    expect(a.thunkHofs).toEqual([{ name: 'compute', fnArg: 1 }]);
+    expect(() => parseAdapter('[[state_hook]]\nstate = 0\n', 't')).toThrow(/name is required/);
+    const r = loadAdapters({ repoDir: HERE, adapters: ['react'], dir: ADAPTERS });
+    expect([...r.stateHooks.keys()]).toEqual(['useState', 'useReducer']);
+    expect([...r.thunkHofs.keys()]).toEqual(['useMemo', 'startTransition']);
+    expect(r.identityHofs.has('forwardRef')).toBe(true);
+  });
+
+  it('--no-adapter excludes an adapter even when it is included by another', () => {
+    const s = loadAdapters({ repoDir: HERE, adapters: ['bff-gateway'], exclude: ['felte'], dir: ADAPTERS });
+    expect(s.names).toEqual(['tanstack-query', 'bff-gateway']);
   });
 
   it('auto-detects from the target repo package.json', () => {

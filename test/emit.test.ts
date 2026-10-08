@@ -212,7 +212,7 @@ export const load = async ({ url }) => {
 });
 
 describe('SvelteKit endpoints', () => {
-  const d = extract({
+  const FILES = {
     'src/routes/a/+page.server.ts': `
 function load(id: string) { return id; }
 export function actionsLog(msg: string) { return msg; }
@@ -233,19 +233,39 @@ export const load = (event) => event;
     'src/lib/server/cache.server.ts': `
 export async function load(key: string) { return key; }
 `,
-  });
-
-  it('only SvelteKit route exports become endpoints', () => {
-    const eps = d.packages
+  };
+  const d = extract(FILES);
+  const endpointNames = (x: typeof d): string[] =>
+    x.packages
       .flatMap((p) => (p.endpoints ?? []) as Array<Record<string, unknown>>)
       .map((e) => String(e.name))
       .sort();
-    expect(eps).toEqual([
+
+  it('only SvelteKit route exports become endpoints', () => {
+    // a `+server` verb is a file-system ROUTE (coverage wave 1 §3.3): named and
+    // keyed by its URL template, so a client call can link to it
+    expect(endpointNames(d)).toEqual([
+      'GET /c',
+      'actions.default src/routes/a',
+      'actions.save src/routes/a',
+      'load src/routes/b',
+    ]);
+    const routes = d.packages.flatMap((p) => (p.httpRoutes ?? []) as Array<Record<string, unknown>>);
+    expect(routes.map((r) => [r.method, r.path, r.framework, r.requestParams])).toEqual([
+      ['GET', '/c', 'sveltekit', [0]],
+    ]);
+    expect(fn(d, 'routes/c/+server.ts:GET').sourceParams).toEqual([0]);
+  });
+
+  it('--no-http-routes: the previous directory-named endpoint, no route', () => {
+    const off = extract(FILES, { httpRoutes: false });
+    expect(endpointNames(off)).toEqual([
       'GET src/routes/c',
       'actions.default src/routes/a',
       'actions.save src/routes/a',
       'load src/routes/b',
     ]);
+    expect(off.packages.flatMap((p) => (p.httpRoutes ?? []) as unknown[])).toEqual([]);
   });
 
   it('a function that is not an endpoint has no untrusted param', () => {
@@ -385,6 +405,30 @@ export function f(u: string, el: HTMLElement, unknownThing: any) {
     for (const c of callsites(f)) {
       if (!String(c.calleeFqn).includes('.ts:')) expect(c.opaque).toBe(true);
     }
+  });
+});
+
+describe('try / finally bodies are walked', () => {
+  const FILES = {
+    'src/a.ts': `
+export function f(el: HTMLElement, q: string) {
+  try {
+    el.innerHTML = q;
+  } catch (e) {
+    console.log(e);
+  } finally {
+    location.href = q;
+  }
+}
+`,
+  };
+  it('a sink inside try and finally is seen', () => {
+    const names = callsites(fn(extract(FILES), 'a.ts:f')).map((c) => c.calleeFqn);
+    expect(names).toEqual(['assign:innerHTML', 'console.log', 'assign:location.href']);
+  });
+  it('--no-try-blocks: only the catch clause, as before', () => {
+    const names = callsites(fn(extract(FILES, { tryBlocks: false }), 'a.ts:f')).map((c) => c.calleeFqn);
+    expect(names).toEqual(['console.log']);
   });
 });
 

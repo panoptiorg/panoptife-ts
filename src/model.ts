@@ -34,6 +34,15 @@ export interface CallSite {
   dispatchConfidence?: number;
   /** WS-A addition; emitted only when the loaded descriptor has the field. */
   argNames?: string[];
+  /** coverage wave 1 §3.4 — set only on a synthetic HTTP client site */
+  httpCall?: HttpCall;
+}
+
+export interface HttpCall {
+  /** upper case; "" = unknown */
+  method: string;
+  /** canonical template; leading `{}` segments = an unresolved base URL */
+  path: string;
 }
 
 export interface LocalFlow {
@@ -74,6 +83,18 @@ export interface Endpoint {
   name: string;
 }
 
+/** coverage wave 1 §3.3 — a server-side route, the contract an HttpCall links to */
+export interface HttpRoute {
+  iid: Uint8Array;
+  method: string;
+  path: string;
+  display: string;
+  handlerIid: Uint8Array;
+  endpointIid: Uint8Array;
+  requestParams: number[];
+  framework: string;
+}
+
 export interface CgfPackage {
   repo: string;
   commitSha: string;
@@ -82,4 +103,5 @@ export interface CgfPackage {
   language: string;
   functions: Fn[];
   endpoints?: Endpoint[];
+  httpRoutes?: HttpRoute[];
 }
