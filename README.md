@@ -17,16 +17,39 @@ path, and the [Go frontend][go] names the matching resolver or route the same
 way, so the engine can follow a value from a page into a Go backend. Vue and
 Angular templates are not read.
 
-**Overview, diagrams and live examples: [panopti.org](https://panopti.org)**
+**Overview, diagrams and live examples: [panopti.org](https://panopti.org)**.
+To use it on your system, see the [user guide](https://panopti.org/guide/).
 
-## Quickstart
+## Install
 
-You need Node.js 22 or later. `fixtures/webapp` is a small SvelteKit app with a
-search page. Its GraphQL client stands in for an in-house gateway, so the
-adapter is named explicitly:
+You need Node.js 22 or later. Install the release tarball, after checking it
+against `SHA256SUMS` from the same release:
+
+<!-- x-release-please-start-version -->
+```bash
+base=https://github.com/panoptiorg/panoptife-ts/releases/download/v0.2.0
+file=panoptiorg-panoptife-ts-0.2.0.tgz
+curl -fLO $base/$file -O $base/SHA256SUMS
+shasum -a 256 -c --ignore-missing SHA256SUMS
+npm install -g ./$file
+```
+<!-- x-release-please-end -->
+
+This puts `pc-fe-ts` on your `PATH`.
+
+## Build from source
 
 ```bash
 npm ci && npm run build
+```
+
+## Quickstart
+
+`fixtures/webapp` is a small SvelteKit app with a search page. Its GraphQL
+client stands in for an in-house gateway, so the adapter is named explicitly.
+From a source checkout:
+
+```bash
 ./bin/pc-fe-ts build fixtures/webapp --adapter bff-gateway --out out/webapp
 ```
 
