@@ -12,6 +12,10 @@ const SRC_EXT = new Set(['.ts', '.tsx', '.js', '.mjs', '.svelte']);
  *  modules in `.cjs`. Joined to the walk with JSX on (`--no-jsx` keeps the
  *  previous walk byte for byte). */
 const SRC_EXT_JSX = new Set([...SRC_EXT, '.jsx', '.cjs']);
+/** The file extensions the walk reads. */
+export function sourceExtensions(jsx: boolean): string[] {
+  return [...(jsx ? SRC_EXT_JSX : SRC_EXT)].sort();
+}
 const SKIP_DIR = new Set([
   'node_modules',
   '.git',

@@ -2,18 +2,22 @@
 
 ```text
 pc-fe-ts build [<repo>] --repo <dir> --out <dir> [--repo-id <id>] [--schema <path>]...
-               [--adapter <name>]... [--no-adapter <name>]... [--no-adapters]
+               [--adapter <name or .toml path>]... [--no-adapter <name>]... [--no-adapters]
                [--no-adapter-routes] [--no-library-writeback]
                [--no-jsx] [--no-jsx-components] [--no-jsx-facts]
                [--no-http-routes] [--no-http-calls] [--no-try-blocks]
                [--no-instance-names]
                [--top-opaque <n>] [--json-stats <file>] [--quiet]
                [--resolver checker|syntactic] [--no-type-anchors]
+pc-fe-ts --version
+pc-fe-ts --help
 ```
 
-`build` is the only subcommand. Running `pc-fe-ts` with no subcommand, or with
-any other, prints the usage text (including the list of known adapters) and
-exits 2.
+`build` is the only subcommand. `--version` prints `pc-fe-ts <version>` (read
+from the installed package's `package.json`) and exits 0. `--help` or `-h`
+prints the usage text, including the shipped adapters, and exits 0; running
+`pc-fe-ts` with no arguments prints it and exits 2. Any other argument error
+prints one `error:` line that names the problem (see [Errors](#errors)).
 
 ## Flags
 
@@ -23,7 +27,7 @@ exits 2.
 | `--out <dir>` | required | Output directory, created if missing. Every existing `*.pb` file in it is deleted before writing, so give each repository its own directory. |
 | `--repo-id <id>` | base name of the repo directory | Written to `CgfPackage.repo` and hashed into every function and endpoint identifier. Keep it stable across runs. |
 | `--schema <path>` | auto-discovered | GraphQL SDL file(s). Repeatable; paths are relative to the current directory. |
-| `--adapter <name>` | auto-detected | Load exactly these adapters (repeatable) instead of auto-detecting. |
+| `--adapter <name or path>` | auto-detected | Load exactly these adapters (repeatable) instead of auto-detecting. A shipped adapter name, or a path to a `.toml` file: a value that ends in `.toml` or contains a path separator is a path, resolved against the current directory. |
 | `--no-adapter <name>` | off | Never load this adapter (repeatable), even when it is detected or another adapter includes it. `--no-adapter react` turns off the React hook and wrapper modelling. |
 | `--no-adapters` | off | Load no adapters at all. |
 | `--no-adapter-routes` | off | Do not generate HTTP endpoints from adapter `[[handler]] route` templates. |
@@ -41,8 +45,8 @@ exits 2.
 | `--json-stats <file>` | off | Write run statistics as JSON: the summary counters, the full opaque-callee histogram (sorted by count) and up to 200 warnings. |
 | `--quiet` | off | Suppress the first progress line. The summary line and `warning:` lines are always printed. |
 
-A flag not in this table is a usage error (exit 2), with one quirk: if it comes
-before the repository has been named, it is taken as the repository path.
+A flag not in this table is a usage error (exit 2); when it is within edit
+distance 2 of a known flag, the message suggests it.
 
 Every flag from `--no-jsx` to `--no-instance-names`, and `--no-adapter react`,
 switches off one addition and restores the earlier output for it: with all of
@@ -61,16 +65,18 @@ an operation become remote calls, and each skipped deeper field produces a
 ## Adapter selection
 
 1. `--no-adapters`: none.
-2. `--adapter <name>`: exactly those, plus whatever they `include`.
+2. `--adapter <name or path>`: exactly those, plus whatever they `include`.
 3. Otherwise every `adapters/*.toml` whose `detect` list intersects the target
    repository's `package.json` `dependencies`, `devDependencies` and
    `peerDependencies`.
 
 `--no-adapter <name>` removes a name from whichever of these sets applies.
 
-Adapters are read from the `adapters/` directory of the installed package;
-there is no flag to point at another directory. An unknown name is a fatal
-error (exit 1). See [../adapters/README.md](../adapters/README.md).
+A name is read from the `adapters/` directory of the installed package; a path
+is read from that file, so an adapter for your own client can live in your
+repository. Auto-detection only considers the shipped adapters. An unknown
+name or a missing file is a fatal error (exit 1). See
+[../adapters/README.md](../adapters/README.md).
 
 ## Output
 
@@ -79,7 +85,7 @@ function, where the package is the file's repository-relative directory (`root`
 for top-level files) and `/`, `\` and `:` in the name are replaced by `_`. Each
 file is a binary `CgfPackage` message with `language = "ts"`. The CGF schema is
 [`proto/cgf.proto`](../proto/cgf.proto), a copy of the engine's (described in
-its [CGF reference](https://github.com/panoptiorg/panopticode/blob/master/docs/cgf.md)),
+its [CGF reference](https://github.com/panoptiorg/panopticode/blob/main/docs/cgf.md)),
 loaded at run time; the environment variable `PC_CGF_PROTO` overrides its
 location.
 
@@ -119,7 +125,8 @@ Two conditions add a `warning:` line (these do not change the exit code):
 - No adapter was loaded (and `--no-adapters` was not given), but the repository
   looks like it uses GraphQL: a dependency or import specifier whose name
   matches `graphql`, `apollo`, `urql` or `relay`, or any `.graphql`/`.gql`
-  file. Pass `--adapter <name>` or write an adapter.
+  file. The warning lists the shipped adapters; pass `--adapter <name>`, or
+`--adapter path/to/your-client.toml` for an adapter you wrote.
 - Zero endpoints and zero operations were emitted: no entry surface (route
   export, Next.js route file or server action, adapter handler route, GraphQL
   operation) was recognised, so no chain starts at an endpoint of this
@@ -133,10 +140,30 @@ Two other lines can appear: `schema-warn:` when a schema file does not parse
 or no `CgfPackage.http_routes`/`CallSite.http_call` (routes and HTTP client
 sites are then not emitted).
 
+## Errors
+
+A problem you can fix prints `error: <message>` on standard error, without a
+stack trace:
+
+```text
+error: unknown flag --adaptr (did you mean --adapter?)
+run pc-fe-ts --help for usage
+```
+
+```text
+error: missing --out <dir>
+error: repo not found: /nonexistent
+error: no TypeScript, JavaScript or Svelte files under ./docs (reads .cjs .js .jsx .mjs .svelte .ts .tsx)
+error: adapter 'nope' not found; shipped adapters: apollo, bff-gateway, felte, graphql-request, react, tanstack-query; or pass a path to a .toml file
+```
+
+Nothing is written to `--out` when the repository check fails. An unexpected
+exception still prints its stack trace.
+
 ## Exit codes
 
 | code | meaning |
 |---|---|
-| 0 | Success, including empty output and a `--repo` directory that does not exist (0 files, plus the second warning above). |
-| 1 | Fatal error: unknown adapter, malformed adapter file, a `--schema` file that cannot be read, `proto/cgf.proto` not found, a message that fails protobuf verification (these print a stack trace), or `dist/` not built (one-line hint). |
-| 2 | Usage error. |
+| 0 | Success, including a repository whose output is empty because no entry surface was recognised (the second warning above). |
+| 1 | Fatal error: `--repo` missing or not a directory, no source files under it, unknown adapter or adapter file not found, malformed adapter file, a `--schema` file that cannot be read, or `dist/` not built (one-line hint). `proto/cgf.proto` not found and a message that fails protobuf verification print a stack trace. |
+| 2 | Usage error: unknown flag or subcommand, missing `--repo` or `--out`, a flag without its value, a bad `--resolver`. |

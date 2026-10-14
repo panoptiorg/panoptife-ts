@@ -10,6 +10,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { UserError } from './errors.js';
 import { num, parseToml, str, strs, type TomlTable } from './toml.js';
 
 export const ADAPTERS_DIR = path.resolve(
@@ -295,20 +296,40 @@ function adapterFile(dir: string, name: string): string {
   return path.join(dir, `${name}.toml`);
 }
 
-/** Read one adapter and everything its `include` names, depth-first. An
- *  excluded name (`--no-adapter`) is skipped wherever it is reached. */
+/** `--adapter` values naming a file rather than a shipped adapter. */
+export function isAdapterPath(spec: string): boolean {
+  return spec.endsWith('.toml') || spec.includes('/') || spec.includes(path.sep);
+}
+
+/** Read one adapter and everything its `include` names, depth-first. A name
+ *  is a shipped adapter; a path (`isAdapterPath`) is read from the file, and
+ *  its `include`s are shipped names. An excluded name (`--no-adapter`) is
+ *  skipped wherever it is reached; a file is excluded by its base name. */
 function loadOne(dir: string, name: string, set: AdapterSet, seen: Set<string>): void {
-  if (seen.has(name)) return;
-  seen.add(name);
-  const file = adapterFile(dir, name);
+  const isPath = isAdapterPath(name);
+  const file = isPath ? path.resolve(name) : adapterFile(dir, name);
+  const key = isPath ? path.basename(file, '.toml') : name;
+  if (seen.has(key) || (isPath && seen.has(file))) return;
+  seen.add(key);
+  if (isPath) seen.add(file);
   if (!fs.existsSync(file)) {
-    throw new Error(`adapter '${name}' not found (looked in ${dir})`);
+    throw new UserError(
+      isPath
+        ? `adapter file not found: ${file}`
+        : `adapter '${name}' not found; shipped adapters: ${listAdapters(dir).join(', ') || '<none>'}; ` +
+            'or pass a path to a .toml file',
+    );
   }
   const text = fs.readFileSync(file, 'utf8');
-  for (const inc of strs(parseToml(text, file).root, 'include', file)) {
-    loadOne(dir, inc, set, seen);
+  try {
+    for (const inc of strs(parseToml(text, file).root, 'include', file)) {
+      loadOne(dir, inc, set, seen);
+    }
+    set.add(parseAdapter(text, file));
+  } catch (e) {
+    if (e instanceof UserError || !(e instanceof Error)) throw e;
+    throw new UserError(e.message);
   }
-  set.add(parseAdapter(text, file));
 }
 
 export function listAdapters(dir = ADAPTERS_DIR): string[] {
@@ -355,7 +376,7 @@ export function autoDetect(repoDir: string, dir = ADAPTERS_DIR): string[] {
 
 export interface AdapterOpts {
   repoDir: string;
-  /** explicit `--adapter` names; overrides auto-detect */
+  /** explicit `--adapter` names or `.toml` paths; overrides auto-detect */
   adapters?: string[];
   /** `--no-adapters` */
   none?: boolean;

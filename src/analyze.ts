@@ -19,7 +19,7 @@ import {
   type HttpClientLib,
 } from './http.js';
 import type { CallSite, CgfPackage, Endpoint, Fn, HttpRoute, Span } from './model.js';
-import { loadAdapters, repoDeps, AdapterSet, type HandlerRule, type InvokeRule } from './adapter.js';
+import { listAdapters, loadAdapters, repoDeps, AdapterSet, type HandlerRule, type InvokeRule } from './adapter.js';
 import {
   assignSinkName,
   CTOR_TYPES,
@@ -35,7 +35,8 @@ import {
   unwrap,
 } from './naming.js';
 import { createRepoProgram, virtualName, type SourceUnit } from './program.js';
-import { loadRepo, resolveImport, type RepoInfo } from './repo.js';
+import { UserError } from './errors.js';
+import { loadRepo, resolveImport, sourceExtensions, type RepoInfo } from './repo.js';
 import {
   hasDirective,
   looksLikeNext,
@@ -3365,6 +3366,11 @@ export function build(opts: BuildOpts): Stats {
     jsx,
     extraRoots: next ? ['app', 'pages'] : [],
   });
+  if (repo.files.length === 0) {
+    throw new UserError(
+      `no TypeScript, JavaScript or Svelte files under ${opts.repoDir} (reads ${sourceExtensions(jsx).join(' ')})`,
+    );
+  }
   // Client-library knowledge is DATA (adapters): the core alone knows nothing
   // about how a document becomes a callable.
   const ad = loadAdapters({
@@ -3375,7 +3381,13 @@ export function build(opts: BuildOpts): Stats {
     exclude: opts.excludeAdapters,
     dir: opts.adaptersDir,
   });
-  const sdlTexts = repo.schemaPaths.map((p) => fs.readFileSync(p, 'utf8'));
+  const sdlTexts = repo.schemaPaths.map((p) => {
+    try {
+      return fs.readFileSync(p, 'utf8');
+    } catch {
+      throw new UserError(`cannot read schema file: ${p}`);
+    }
+  });
   const sdl = loadSdl(sdlTexts);
   const resolver = opts.resolver ?? 'checker';
 
@@ -3683,8 +3695,8 @@ function emitEmptyOutputWarnings(
     if (evidence.length) {
       process.stderr.write(
         `warning: no adapter matched package.json (deps: ${deps.join(', ') || '<none>'}) but the ` +
-          `repo looks GraphQL-shaped (evidence: ${evidence.join(', ')}); pass --adapter <name> or ` +
-          `write an adapter — see docs\n`,
+          `repo looks GraphQL-shaped (evidence: ${evidence.join(', ')}); pass --adapter <name> ` +
+          `(shipped: ${listAdapters().join(', ')}) or --adapter path/to/your-client.toml\n`,
       );
     }
   }
