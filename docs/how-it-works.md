@@ -300,7 +300,7 @@ variables (`[[invoke]]`). See [../adapters/README.md](../adapters/README.md).
 `fixtures/webapp` joins this way to `graphql:Query.searchByToken`, served by
 panoptife-go's `federation` fixture. The two, with `backend` and `downstream`,
 form the example system;
-[The example system](https://github.com/panoptiorg/panopticode/blob/master/docs/example.md)
+[The example system](https://github.com/panoptiorg/panopticode/blob/main/docs/example.md)
 maps their code to the 18 findings they produce.
 
 ## HTTP client calls
@@ -402,7 +402,7 @@ over the same commit produce identical bytes.
 ## Known gaps
 
 What the extraction misses or over-approximates. The engine has limits of its
-own; see its [limitations](https://github.com/panoptiorg/panopticode/blob/master/docs/limitations.md).
+own; see its [limitations](https://github.com/panoptiorg/panopticode/blob/main/docs/limitations.md).
 
 - Only GraphQL fields that take arguments are joined. An argument-free field
   (`me { id }`) produces no call site, so nothing links it to the server.
@@ -452,4 +452,4 @@ own; see its [limitations](https://github.com/panoptiorg/panopticode/blob/master
   modelled, `bind:` is lowered only for a dotted path, and a file that fails to
   parse contributes no code ([Svelte lowering](#svelte-lowering)).
 - A universal `load` in `+page.ts` or `+layout.ts` is not an endpoint, so its
-  parameter is not marked untrusted ([endpoints](#endpoints)).
+  parameter is not marked untrusted ([endpoints](#endpoints-and-routes)).

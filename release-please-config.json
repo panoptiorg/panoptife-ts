@@ -6,7 +6,8 @@
   "include-component-in-tag": false,
   "packages": {
     ".": {
-      "package-name": "@panoptiorg/panoptife-ts"
+      "package-name": "@panoptiorg/panoptife-ts",
+      "extra-files": ["README.md"]
     }
   }
 }

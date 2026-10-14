@@ -10,4 +10,5 @@ if (!existsSync(entry)) {
   process.stderr.write(`pc-fe-ts: ${entry} missing — run \`npm ci && npm run build\` in ${join(here, '..')}\n`);
   process.exit(1);
 }
-await import(pathToFileURL(entry).href);
+const { main } = await import(pathToFileURL(entry).href);
+process.exitCode = main(process.argv.slice(2));

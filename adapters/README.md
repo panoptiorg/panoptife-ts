@@ -14,6 +14,7 @@ the `bff-gateway` example's names (such as `getClientHandler` or
 ```bash
 pc-fe-ts build <repo> --out <dir>                                   # auto-detect
 pc-fe-ts build <repo> --out <dir> --adapter apollo --adapter felte  # exactly these
+pc-fe-ts build <repo> --out <dir> --adapter ./adapters/my-client.toml  # a file of your own
 pc-fe-ts build <repo> --out <dir> --no-adapters                     # none
 pc-fe-ts build <repo> --out <dir> --no-adapter react                # auto-detect, minus one
 ```
@@ -25,9 +26,15 @@ adapter's `include` list is loaded first, depth-first; each adapter is loaded
 at most once. `--no-adapter <name>` (repeatable) keeps an adapter out even when
 it is detected or included.
 
-Adapters are looked up by file name (`--adapter apollo` reads
-`adapters/apollo.toml`) in the `adapters/` directory of the installed package.
-There is no flag for another directory: to add an adapter, put the file there.
+`--adapter` takes a shipped adapter name (`--adapter apollo` reads
+`adapters/apollo.toml` in the installed package) or a path to a `.toml` file. A
+value that ends in `.toml` or contains a path separator is a path, resolved
+against the current directory. Auto-detection only considers the shipped
+adapters.
+
+To model your own GraphQL client, keep the adapter in your own repository and
+pass its path; do not edit the installed package. Names in its `include` list
+refer to shipped adapters.
 
 ## Shipped adapters
 
@@ -168,10 +175,12 @@ difference to the output. The shipped files still set them as annotations.
 3. Say where the variables are at the call: an argument index, a property, or
    both.
 4. Add `detect` with the package name so auto-detection finds it.
-5. Put the file in `adapters/`, add a fixture under `test/fixtures/<name>/`
-   (`package.json`, `schema.graphql`, and a URL parameter reaching a variable)
-   and assert the `graphql:<Type>.<field>` call in `test/adapter.test.ts`, as
-   the `apollo` and `graphql-request` fixtures do.
+5. Keep the file in your repository and pass it with `--adapter <path>`. To
+   contribute it here instead, put it in `adapters/`, add a fixture under
+   `test/fixtures/<name>/` (`package.json`, `schema.graphql`, and a URL
+   parameter reaching a variable) and assert the `graphql:<Type>.<field>` call
+   in `test/adapter.test.ts`, as the `apollo` and `graphql-request` fixtures
+   do.
 
 Check the result with `--top-opaque 20`: calls into your client that still show
 up there are not modelled yet.
