@@ -17,8 +17,7 @@ path, and the [Go frontend][go] names the matching resolver or route the same
 way, so the engine can follow a value from a page into a Go backend. Vue and
 Angular templates are not read.
 
-**Overview, diagrams and live examples: [panopti.org](https://panopti.org)**.
-To use it on your system, see the [user guide](https://panopti.org/guide/).
+**Overview, diagrams and live examples: [panopti.org](https://panopti.org)**
 
 ## Install
 
