@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.3.0](https://github.com/panoptiorg/panoptife-ts/compare/v0.2.0...v0.3.0) (2026-10-14)
+
+
+### Features
+
+* --adapter accepts a path to a .toml file, so a custom adapter can live in your own repository ([cc5346a](https://github.com/panoptiorg/panoptife-ts/commit/cc5346aad9747b2df39fa20fbaeeec494b6b9148))
+* --version ([cc5346a](https://github.com/panoptiorg/panoptife-ts/commit/cc5346aad9747b2df39fa20fbaeeec494b6b9148))
+
+
+### Bug Fixes
+
+* a missing repo, a file or a repo with no source files is an error instead of an empty CGF ([cc5346a](https://github.com/panoptiorg/panoptife-ts/commit/cc5346aad9747b2df39fa20fbaeeec494b6b9148))
+* an unknown adapter lists the shipped adapters; no stack trace for user errors ([cc5346a](https://github.com/panoptiorg/panoptife-ts/commit/cc5346aad9747b2df39fa20fbaeeec494b6b9148))
+* name an unknown flag (with a suggestion) or a missing option, exit 2; full usage only for --help ([cc5346a](https://github.com/panoptiorg/panoptife-ts/commit/cc5346aad9747b2df39fa20fbaeeec494b6b9148))
+
 ## [0.2.0](https://github.com/panoptiorg/panoptife-ts/compare/v0.1.1...v0.2.0) (2026-10-08)
 
 
