@@ -18,6 +18,12 @@ import {
   verbMethod,
   type HttpClientLib,
 } from './http.js';
+import {
+  buildManifest,
+  changedFiles,
+  warnIfNotHead,
+  writeManifest,
+} from './manifest.js';
 import type { CallSite, CgfPackage, Endpoint, Fn, HttpRoute, Span } from './model.js';
 import { listAdapters, loadAdapters, repoDeps, AdapterSet, type HandlerRule, type InvokeRule } from './adapter.js';
 import {
@@ -150,6 +156,9 @@ export interface Stats {
   httpCallsDynamicBase: number;
   /** … whose method is unknown */
   httpCallsUnknownMethod: number;
+  /** mr mode — rows of the written manifest.json */
+  mrChangedFiles?: number;
+  mrChangedFns?: number;
 }
 
 export interface BuildOpts {
@@ -233,6 +242,18 @@ export interface BuildOpts {
    * reproduces the previous emission.
    */
   instanceNames?: boolean;
+  /**
+   * MR mode (default 'main'). 'mr' extracts the working tree exactly as in
+   * main mode and also writes `<outDir>/manifest.json` (see manifest.ts):
+   * the files `git diff --base --head` reports and every emitted function
+   * declared in them, so the core's `impact` report can name what the MR
+   * touches. Requires `base` and `head`.
+   */
+  mode?: 'main' | 'mr';
+  /** mr mode: the base commit of the diff */
+  base?: string;
+  /** mr mode: the head commit the working tree is checked out at */
+  head?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -3567,6 +3588,16 @@ export function build(opts: BuildOpts): Stats {
     if (!cp.httpRoutes!.length) delete cp.httpRoutes;
     const bytes = opts.codec.encodePackage(cp);
     fs.writeFileSync(path.join(opts.outDir, sanitize(p) + '.pb'), bytes);
+  }
+  if (opts.mode === 'mr') {
+    // the working tree is the head state; --base only feeds the diff
+    warnIfNotHead(opts.repoDir, opts.head!);
+    const files = changedFiles(opts.repoDir, opts.base!, opts.head!);
+    const fns = [...byPkg.values()].flatMap((cp) => cp.functions);
+    const m = buildManifest(opts.mode, opts.base!, opts.head!, files, fns);
+    writeManifest(opts.outDir, m);
+    em.stats.mrChangedFiles = m.changed_files.length;
+    em.stats.mrChangedFns = m.changed_fns.length;
   }
   if (!opts.quiet) censusLines(em.stats);
   emitEmptyOutputWarnings(repo, opts, ad, em.stats);

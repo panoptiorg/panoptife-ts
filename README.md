@@ -78,6 +78,7 @@ findings stay inside the app.
 | | |
 |---|---|
 | [CLI](docs/cli.md) | every flag, schema discovery, adapter selection, exit codes |
+| [Merge-request mode](docs/cli.md#merge-request-mode) | `--mode mr --base <sha> --head <sha>` writes `manifest.json` naming what an MR touches |
 | [How it works](docs/how-it-works.md) | Svelte lowering, JSX and React, call resolution, endpoints and routes, the GraphQL join, HTTP client calls, known gaps |
 | [Adapters](adapters/README.md) | the shipped adapters, and how to write one for your GraphQL client |
 | [fixtures/webapp](https://github.com/panoptiorg/panoptife-ts/tree/main/fixtures/webapp) | the example app used above |
