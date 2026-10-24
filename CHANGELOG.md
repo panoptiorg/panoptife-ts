@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/panoptiorg/panoptife-ts/compare/v0.3.0...v0.4.0) (2026-10-24)
+
+
+### Features
+
+* MR mode writes manifest.json for impact ([#8](https://github.com/panoptiorg/panoptife-ts/issues/8)) ([c803b15](https://github.com/panoptiorg/panoptife-ts/commit/c803b15192b4a3b55eb024c27389892dc691c6e6))
+
 ## [0.3.0](https://github.com/panoptiorg/panoptife-ts/compare/v0.2.0...v0.3.0) (2026-10-14)
 
 

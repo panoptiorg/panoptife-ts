@@ -26,8 +26,8 @@ against `SHA256SUMS` from the same release:
 
 <!-- x-release-please-start-version -->
 ```bash
-base=https://github.com/panoptiorg/panoptife-ts/releases/download/v0.3.0
-file=panoptiorg-panoptife-ts-0.3.0.tgz
+base=https://github.com/panoptiorg/panoptife-ts/releases/download/v0.4.0
+file=panoptiorg-panoptife-ts-0.4.0.tgz
 curl -fLO $base/$file -O $base/SHA256SUMS
 shasum -a 256 -c --ignore-missing SHA256SUMS
 npm install -g ./$file
