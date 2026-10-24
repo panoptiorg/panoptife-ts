@@ -9,6 +9,7 @@ pc-fe-ts build [<repo>] --repo <dir> --out <dir> [--repo-id <id>] [--schema <pat
                [--no-instance-names]
                [--top-opaque <n>] [--json-stats <file>] [--quiet]
                [--resolver checker|syntactic] [--no-type-anchors]
+               [--mode main|mr] [--base <sha>] [--head <sha>]
 pc-fe-ts --version
 pc-fe-ts --help
 ```
@@ -42,8 +43,10 @@ prints one `error:` line that names the problem (see [Errors](#errors)).
 | `--resolver checker\|syntactic` | `checker` | `syntactic` skips the TypeScript program and resolves through import tables only. It exists for comparison; it resolves less. Any other value exits 2. |
 | `--no-type-anchors` | off | Disable type anchors (made only by the `checker` resolver; see [how-it-works.md](how-it-works.md#the-typescript-program-and-call-resolution)). |
 | `--top-opaque <n>` | `0` | After the summary, print the `n` most frequent unresolved `callee_fqn` values. `0` prints nothing. |
-| `--json-stats <file>` | off | Write run statistics as JSON: the summary counters, the full opaque-callee histogram (sorted by count) and up to 200 warnings. |
+| `--json-stats <file>` | off | Write run statistics as JSON: the summary counters, the full opaque-callee histogram (sorted by count) and up to 200 warnings. In `mr` mode also `mrChangedFiles` and `mrChangedFns`. |
 | `--quiet` | off | Suppress the first progress line. The summary line and `warning:` lines are always printed. |
+| `--mode main\|mr` | `main` | `mr` also writes `manifest.json` to `--out` (see [Merge-request mode](#merge-request-mode)). |
+| `--base <sha>`, `--head <sha>` | none | Commits to diff in `mr` mode; both required there. |
 
 A flag not in this table is a usage error (exit 2); when it is within edit
 distance 2 of a known flag, the message suggests it.
@@ -90,6 +93,43 @@ loaded at run time; the environment variable `PC_CGF_PROTO` overrides its
 location.
 
 Two runs over the same commit produce byte-identical output.
+
+## Merge-request mode
+
+`--mode mr` extracts the working tree exactly as `main` mode does, and also
+writes `manifest.json` next to the `.pb` files. The core's loader reads only
+`*.pb`, so the extra file never collides; its `impact` command reads the
+manifest to name what a merge request touches:
+
+```json
+{
+  "mode": "mr",
+  "base": "<sha>",
+  "head": "<sha>",
+  "changed_files": ["<repo-relative path>"],
+  "changed_fns": [{ "iid": "<hex>", "bid": "<hex>", "fqn": "<fqn>", "file": "<repo-relative path>" }]
+}
+```
+
+- `changed_files` is the output of `git diff --name-only --relative <base>
+  <head>` run in the repository; `--relative` keeps paths relative to
+  `--repo` even when it is a subdirectory of the git top level. A deleted
+  file has no functions at head, so it appears in `changed_files` only.
+- `changed_fns` lists every emitted function whose span file is in
+  `changed_files` — the file-level rule, so renaming one function in a
+  changed file still lists its neighbours. Svelte `$script` functions and
+  adapter handler functions count like any other. `iid` and `bid` are the
+  lowercase hex of the CGF function's identifiers; `fqn` and `file` are
+  repo-relative.
+- A git failure (unknown commit, no git repository) is a fatal error with the
+  git message and exit code 1.
+- The working tree is trusted to be checked out at `--head` (CI checkouts are);
+  when it is not, a `warning:` line says so and the extraction still reflects
+  the working tree.
+
+In `mr` mode a line `mr base=<sha> head=<sha> changed_files=<n>
+changed_fns=<n>` precedes the summary line (both always printed, `--quiet`
+only suppresses the progress line).
 
 ## Standard error
 
@@ -165,5 +205,5 @@ exception still prints its stack trace.
 | code | meaning |
 |---|---|
 | 0 | Success, including a repository whose output is empty because no entry surface was recognised (the second warning above). |
-| 1 | Fatal error: `--repo` missing or not a directory, no source files under it, unknown adapter or adapter file not found, malformed adapter file, a `--schema` file that cannot be read, or `dist/` not built (one-line hint). `proto/cgf.proto` not found and a message that fails protobuf verification print a stack trace. |
-| 2 | Usage error: unknown flag or subcommand, missing `--repo` or `--out`, a flag without its value, a bad `--resolver`. |
+| 1 | Fatal error: `--repo` missing or not a directory, no source files under it, unknown adapter or adapter file not found, malformed adapter file, a `--schema` file that cannot be read, a `git diff` that fails in `mr` mode (unknown commit, no git repository), or `dist/` not built (one-line hint). `proto/cgf.proto` not found and a message that fails protobuf verification print a stack trace. |
+| 2 | Usage error: unknown flag or subcommand, missing `--repo` or `--out`, a flag without its value, a bad `--resolver`, a bad `--mode`, or `--mode mr` without `--base` or `--head`. |

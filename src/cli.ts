@@ -6,6 +6,7 @@
 //                  [--no-http-routes] [--no-http-calls] [--no-try-blocks] [--no-instance-names]
 //                  [--top-opaque N] [--json-stats <file>] [--quiet]
 //                  [--resolver checker|syntactic] [--no-type-anchors]
+//                  [--mode main|mr] [--base <sha>] [--head <sha>]
 import * as fs from 'node:fs';
 import { listAdapters } from './adapter.js';
 import { build } from './analyze.js';
@@ -21,6 +22,7 @@ const USAGE =
   '                     [--no-instance-names]\n' +
   '                     [--top-opaque <n>] [--json-stats <file>] [--quiet]\n' +
   '                     [--resolver checker|syntactic] [--no-type-anchors]\n' +
+  '                     [--mode main|mr] [--base <sha>] [--head <sha>]\n' +
   '       pc-fe-ts --version\n';
 
 /** Flags that take a value, and flags that do not. */
@@ -34,6 +36,9 @@ const VALUE_FLAGS = [
   '--resolver',
   '--adapter',
   '--no-adapter',
+  '--mode',
+  '--base',
+  '--head',
 ];
 const BOOL_FLAGS = [
   '--no-type-anchors',
@@ -127,6 +132,9 @@ function run(argv: string[]): void {
   let jsonStats = '';
   let quiet = false;
   let resolver: 'checker' | 'syntactic' = 'checker';
+  let mode: 'main' | 'mr' = 'main';
+  let base = '';
+  let head = '';
   let typeAnchors = true;
   let noAdapters = false;
   let libraryWriteback = true;
@@ -171,6 +179,18 @@ function run(argv: string[]): void {
             throw usageError(`--resolver must be checker or syntactic, got '${v}'`);
           }
           resolver = v;
+          break;
+        case '--mode':
+          if (v !== 'main' && v !== 'mr') {
+            throw usageError(`--mode must be main or mr, got '${v}'`);
+          }
+          mode = v;
+          break;
+        case '--base':
+          base = v;
+          break;
+        case '--head':
+          head = v;
           break;
         case '--adapter':
           adapters.push(v);
@@ -230,6 +250,8 @@ function run(argv: string[]): void {
   }
   if (!repoDir) throw usageError('missing --repo <dir>');
   if (!outDir) throw usageError('missing --out <dir>');
+  if (mode === 'mr' && !base) throw usageError('--mode mr needs --base <sha>');
+  if (mode === 'mr' && !head) throw usageError('--mode mr needs --head <sha>');
   if (!fs.existsSync(repoDir)) throw new UserError(`repo not found: ${repoDir}`);
   if (!fs.statSync(repoDir).isDirectory()) throw new UserError(`repo is not a directory: ${repoDir}`);
 
@@ -256,7 +278,19 @@ function run(argv: string[]): void {
     httpCalls,
     tryBlocks,
     instanceNames,
+    mode,
+    base: base || undefined,
+    head: head || undefined,
   });
+  if (mode === 'mr') {
+    // one line naming what the MR touches, as the Go frontend prints before
+    // its summary; not suppressed by --quiet, like the summary itself
+    const short = (s: string): string => (s.length > 8 ? s.slice(0, 8) : s);
+    process.stderr.write(
+      `mr base=${short(base)} head=${short(head)} changed_files=${stats.mrChangedFiles ?? 0} ` +
+        `changed_fns=${stats.mrChangedFns ?? 0}\n`,
+    );
+  }
   const top = [...stats.opaque.entries()]
     .sort((x, y) => y[1] - x[1] || (x[0] < y[0] ? -1 : 1))
     .slice(0, topOpaque || 10);
