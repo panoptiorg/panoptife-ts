@@ -111,15 +111,20 @@ export const authLoginClient = $gateway.getClientHandler('auth/login');
   const remote = callsites(op).filter((c) => c.kind === 'INVOKES_REMOTE');
 
   it('walks the SDL to the nested parent type', () => {
-    expect(remote.map((c) => c.calleeFqn)).toEqual(['graphql:AuthMutations.login']);
+    // the namespaced root `auth` is a resolver call too (no args, no slots)
+    expect(remote.map((c) => c.calleeFqn)).toEqual([
+      'graphql:Mutation.auth',
+      'graphql:AuthMutations.login',
+    ]);
   });
   it('the whole `input` arg carries the variables (MVP: no k=2 field path)', () => {
-    expect(remote[0]!.argNames).toEqual(['input']);
+    const login = remote.find((c) => c.calleeFqn === 'graphql:AuthMutations.login')!;
+    expect(login.argNames).toEqual(['input']);
     expect(
       connected(
         op,
         (v) => kindOf(v) === 'IN_PARAM',
-        (v) => kindOf(v) === 'CALL_ARG_PORT' && Number(v.callsiteId ?? 0) === Number(remote[0]!.id ?? 0),
+        (v) => kindOf(v) === 'CALL_ARG_PORT' && Number(v.callsiteId ?? 0) === Number(login.id ?? 0),
       ),
     ).toBe(true);
   });
@@ -135,7 +140,82 @@ export const q = gql\`mutation M($p: String) { auth { login(input: { pincode: $p
     const cs = callsites(fn(noSdl, 'login/index.ts:$op')).filter(
       (c) => c.kind === 'INVOKES_REMOTE',
     );
-    expect(cs).toHaveLength(0); // `login` is not a root field: skipped, not guessed
+    // the ROOT field `auth` still names a resolver (no SDL, fallback parent);
+    // `login` is not a root field: skipped, not guessed
+    expect(cs.map((c) => c.calleeFqn)).toEqual(['graphql:Mutation.auth']);
+    expect(cs[0]!.argc).toBe(0);
+  });
+});
+
+describe('root fields without arguments still reach a resolver', () => {
+  const SCHEMA2 = `
+type Query { userState: UserState!, brokerQueries: BrokerRoot! }
+type UserState { state: String! }
+type BrokerRoot { list(x: Int!): [ListItem!]! }
+type ListItem { id: ID! }
+type Mutation { ping: Boolean! }
+`;
+  const files = (op: string): Record<string, string> => ({
+    'schema.graphql': SCHEMA2,
+    'src/api/core/client.ts': CLIENT_STUB,
+    'src/api/endpoints/x/index.ts': `
+import { browser, GatewayEndpoint, gql } from '../../core/client';
+export const $gateway = GatewayEndpoint.create({
+  gqlNode: !browser && gql\`${op}\`,
+});
+export const xClient = $gateway.getClientHandler('x');
+`,
+  });
+  const remoteOf = (d: ReturnType<typeof extract>) =>
+    callsites(fn(d, 'x/index.ts:$op')).filter((c) => c.kind === 'INVOKES_REMOTE');
+
+  it('a no-arg root query gets its graphql: contract', () => {
+    const d = extract(
+      files(`query UserState { userState { state } }`),
+    );
+    const remote = remoteOf(d);
+    expect(remote.map((c) => c.calleeFqn)).toEqual(['graphql:Query.userState']);
+    expect(remote[0]!.argc).toBe(0);
+    expect(remote[0]!.argNames ?? []).toEqual([]);
+    expect(remote[0]!.resultc).toBe(1);
+    // zero argument slots: nothing new flows INTO the call. The RESULT
+    // direction is live, though — the invoke's result port feeds the $op
+    // return, so a resolver return carrying a server-side source reaches
+    // frontend sinks through this field (new chains, result direction only).
+    expect(
+      connected(
+        fn(d, 'x/index.ts:$op'),
+        (v) => kindOf(v) === 'IN_PARAM',
+        (v) => kindOf(v) === 'CALL_ARG_PORT',
+      ),
+    ).toBe(false);
+  });
+
+  it('a mutation with no args gets its contract too', () => {
+    const d = extract(files('mutation DoIt { ping }'));
+    expect(remoteOf(d).map((c) => c.calleeFqn)).toEqual(['graphql:Mutation.ping']);
+  });
+
+  it('a namespaced root emits the root field AND its arg child — no duplicate', () => {
+    const d = extract(
+      files('query Brokers { brokerQueries { list(x: 1) { id } } }'),
+    );
+    expect(remoteOf(d).map((c) => c.calleeFqn)).toEqual([
+      'graphql:Query.brokerQueries',
+      'graphql:BrokerRoot.list',
+    ]);
+  });
+
+  it('a fragment spread at the root counts as the root selection', () => {
+    const d = extract(
+      files('query F { ...userStateFields } fragment userStateFields on Query { userState { state } }'),
+    );
+    expect(remoteOf(d).map((c) => c.calleeFqn)).toEqual(['graphql:Query.userState']);
+    // …but a no-arg field BELOW the root is still not a resolver call
+    const d2 = extract(
+      files('query F { userState { ...stateFields } } fragment stateFields on UserState { state }'),
+    );
+    expect(remoteOf(d2).map((c) => c.calleeFqn)).toEqual(['graphql:Query.userState']);
   });
 });
 
@@ -151,6 +231,8 @@ export const $gateway = GatewayEndpoint.create({
 });
 export const searchClient = $gateway.getClientHandler('search');
 `,
+    'src/routes/x/+page.svelte': '<h1>x</h1>', // makes src/routes/x a route
+
     'src/routes/x/+page.server.ts': `
 import { searchClient } from '../../api/endpoints/search';
 export const load = async ({ url }) => {
@@ -204,7 +286,7 @@ export const load = async ({ url }) => {
     const eps = d.packages.flatMap(
       (p) => (p.endpoints ?? []) as Array<Record<string, unknown>>,
     );
-    const ep = eps.find((e) => String(e.name).startsWith('load '));
+    const ep = eps.find((e) => e.name === 'GET /x/__data.json');
     expect(ep).toBeTruthy();
     expect(ep!.kind).toBe('HTTP');
     expect(ep!.untrustedInput).toBe(true);
@@ -213,6 +295,8 @@ export const load = async ({ url }) => {
 
 describe('SvelteKit endpoints', () => {
   const FILES = {
+    // a `+page` file is what makes the directory a route
+    'src/routes/a/+page.svelte': '<h1>a</h1>',
     'src/routes/a/+page.server.ts': `
 function load(id: string) { return id; }
 export function actionsLog(msg: string) { return msg; }
@@ -221,6 +305,7 @@ export const actions = {
   save: (event) => () => event,
 };
 `,
+    'src/routes/b/+page.svelte': '<h1>b</h1>',
     'src/routes/b/+layout.server.ts': `
 const load = async (event) => event;
 export { load };
@@ -244,14 +329,16 @@ export async function load(key: string) { return key; }
   it('only SvelteKit route exports become endpoints', () => {
     // a `+server` verb is a file-system ROUTE (coverage wave 1 §3.3): named and
     // keyed by its URL template, so a client call can link to it
-    expect(endpointNames(d)).toEqual([
-      'GET /c',
-      'actions.default src/routes/a',
-      'actions.save src/routes/a',
-      'load src/routes/b',
-    ]);
+    expect(endpointNames(d)).toEqual(['GET /b/__data.json', 'GET /c', 'POST /a']);
     const routes = d.packages.flatMap((p) => (p.httpRoutes ?? []) as Array<Record<string, unknown>>);
-    expect(routes.map((r) => [r.method, r.path, r.framework, r.requestParams])).toEqual([
+    expect(
+      routes
+        .map((r) => [r.method, r.path, r.framework, r.requestParams])
+        .sort((a, b) => (String(a[1]) + a[2] < String(b[1]) + b[2] ? -1 : 1)),
+    ).toEqual([
+      ['POST', '/a', 'sveltekit-action', [0]],
+      ['POST', '/a', 'sveltekit-action', [0]],
+      ['GET', '/b/__data.json', 'sveltekit-load', [0]],
       ['GET', '/c', 'sveltekit', [0]],
     ]);
     expect(fn(d, 'routes/c/+server.ts:GET').sourceParams).toEqual([0]);

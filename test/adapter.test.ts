@@ -313,3 +313,160 @@ export const payClient = $gateway.getClientHandler('pay');
     expect(h.bindsTo ?? []).toHaveLength(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// the *.gql.ts endpoint shape and a custom gateway root
+// ---------------------------------------------------------------------------
+
+describe('[[handler]] route — the one-operation-per-file *.gql.ts shape', () => {
+  // An acme-style gateway also serves `<root>/**/*.gql.ts`, one operation
+  // per file, and derives the URL from the FILE NAME — not from the string
+  // handed to `getClientHandler` (here deliberately different). `<root>` is
+  // whatever the repo configures (`src/shared/gw` here, not the default
+  // `src/service/gateway`), so the regexes must be root-agnostic.
+  const FILES = {
+    'schema.graphql': 'type Query { user(id: ID!): String! account(id: ID!): String! }',
+    'src/shared/gw/core/client.ts': `
+export const GatewayEndpoint = { create<T>(c: T): T { return c; } };
+export const browser = false;
+export function gql(s: TemplateStringsArray): string { return String(s); }
+`,
+    // the call-site string ('user') drifts from the file name; the FILE wins
+    'src/shared/gw/ops/queryUser.gql.ts': `
+import { browser, GatewayEndpoint, gql } from '../core/client';
+export const $gateway = GatewayEndpoint.create({
+  gqlNode: !browser && gql\`query QueryUser($id: ID!) { user(id: $id) }\`,
+});
+export const queryUserClient = $gateway.getClientHandler('user');
+`,
+    // the gateway serves the file even with NO getClientHandler call in it
+    'src/shared/gw/ops/queryAccount.gql.ts': `
+import { browser, GatewayEndpoint, gql } from '../core/client';
+export const $gateway = GatewayEndpoint.create({
+  gqlNode: !browser && gql\`query QueryAccount($id: ID!) { account(id: $id) }\`,
+});
+`,
+    'src/routes/page.ts': `
+import { queryUserClient } from '../shared/gw/ops/queryUser.gql';
+export function go(el: HTMLElement) {
+  const id = new URLSearchParams(location.search).get('id');
+  el.innerHTML = queryUserClient.call({ id });
+}
+`,
+  };
+
+  it('names the route after the FILE, not the call-site string', () => {
+    const d = extract(FILES, { adapters: ['bff-gateway'] });
+    const eps = d.packages.flatMap((p) => (p.endpoints ?? []) as Array<Record<string, unknown>>);
+    const names = eps.map((e) => e.name).sort();
+    expect(names).toContain('POST /api/queryUser');
+    expect(names).not.toContain('POST /api/user');
+  });
+
+  it('serves a *.gql.ts endpoint file that has no getClientHandler call', () => {
+    const d = extract(FILES, { adapters: ['bff-gateway'] });
+    const eps = d.packages.flatMap((p) => (p.endpoints ?? []) as Array<Record<string, unknown>>);
+    const ep = eps.find((e) => e.name === 'POST /api/queryAccount');
+    expect(ep).toBeTruthy();
+    expect(ep!.kind).toBe('HTTP');
+    expect(ep!.untrustedInput).toBe(true);
+    // the route is anchored at the operation, with the variables as input
+    const op = fn(d, 'ops/queryAccount.gql.ts:$op');
+    expect(op.bindsTo).toHaveLength(1);
+    expect(op.sourceParams).toEqual([0]);
+  });
+
+  it('links the handler, its op and the route like the standard shape', () => {
+    const d = extract(FILES, { adapters: ['bff-gateway'] });
+    const h = fn(d, 'ops/queryUser.gql.ts:queryUserClient');
+    expect(h.bindsTo).toHaveLength(1);
+    expect(h.sourceParams).toEqual([0]);
+    // the page's URL read reaches the GraphQL field THROUGH the handler and op
+    const page = fn(d, 'routes/page.ts:go');
+    expect(flows(page, 'URLSearchParams.get', 'ops/queryUser.gql.ts:queryUserClient')).toBe(true);
+    const hSites = callsites(h).map((c) => c.calleeFqn);
+    expect(hSites).toContain('src/shared/gw/ops/queryUser.gql.ts:$op');
+    const gqlSites = allCallsites(d)
+      .filter((c) => String(c.calleeFqn).startsWith('graphql:'))
+      .map((c) => c.calleeFqn)
+      .sort();
+    expect(gqlSites).toEqual(['graphql:Query.account', 'graphql:Query.user']);
+  });
+
+  it('--no-adapter-routes drops both file-side and call-side routes', () => {
+    const d = extract(FILES, { adapters: ['bff-gateway'], adapterRoutes: false });
+    const eps = d.packages.flatMap((p) => (p.endpoints ?? []) as Array<Record<string, unknown>>);
+    expect(eps).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// a stale registry path gets no route
+// ---------------------------------------------------------------------------
+
+describe('[[handler]] route — a stale registry path gets no route', () => {
+  // A registry handler whose `getClientHandler('<string>')` names no
+  // registered endpoint file is served by nothing: the gateway's URL comes
+  // from the FILE, wherever the handler is declared. The endpoint file itself
+  // (no in-file handler here) is the only entry — the stale string must not
+  // add a second one the server does not serve.
+  const FILES = {
+    'schema.graphql': 'type Query { account(id: ID!): String! }',
+    'src/gw/core/client.ts': `
+export const GatewayEndpoint = { create<T>(c: T): T { return c; } };
+export const browser = false;
+export function gql(s: TemplateStringsArray): string { return String(s); }
+`,
+    // the file registers 'queryAccount' (its own name); no handler in it
+    'src/gw/ops/queryAccount.gql.ts': `
+import { browser, GatewayEndpoint, gql } from '../core/client';
+export const $gateway = GatewayEndpoint.create({
+  gqlNode: !browser && gql\`query QueryAccount($id: ID!) { account(id: $id) }\`,
+});
+`,
+    // a central registry whose string has drifted from the file name
+    'src/api/registry.ts': `
+import { $gateway } from '../gw/ops/queryAccount.gql';
+export const userApi = $gateway.getClientHandler('user');
+`,
+  };
+
+  it('one entry, from the file; the stale string adds none', () => {
+    const d = extract(FILES, { adapters: ['bff-gateway'] });
+    const eps = d.packages.flatMap((p) => (p.endpoints ?? []) as Array<Record<string, unknown>>);
+    expect(eps.map((e) => e.name)).toEqual(['POST /api/queryAccount']);
+    // the stale handler is bound to no endpoint of its own
+    const h = fn(d, 'api/registry.ts:userApi');
+    expect(h.bindsTo ?? []).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// op_dir_regex — the gateway's URL rules, expressed as adapter data
+// ---------------------------------------------------------------------------
+
+describe('op_dir_regex — gateway URL rules as data', () => {
+  const s = loadAdapters({ repoDir: HERE, adapters: ['bff-gateway'], dir: ADAPTERS });
+  const reg = (rel: string): string | null => s.opDirRuleOf(rel)?.path ?? null;
+
+  it('a.b.gql.ts registers a — the basename up to the FIRST dot', () => {
+    expect(reg('src/gw/ops/a.b.gql.ts')).toBe('a');
+    expect(reg('src/gw/ops/a.b.c.gql.ts')).toBe('a');
+    expect(reg('src/gw/ops/queryUser.gql.ts')).toBe('queryUser');
+  });
+
+  it('only .gql.ts and index.ts are served — no .js, no other suffix', () => {
+    expect(reg('src/gw/ops/queryUser.gql.js')).toBe(null);
+    expect(reg('src/gw/ops/queryUser.gql.tsx')).toBe(null);
+    expect(reg('src/gw/endpoints/x/index.js')).toBe(null);
+  });
+
+  it('nested endpoints dirs: the LAST one wins, like the gateway', () => {
+    expect(reg('x/endpoints/a/endpoints/b/index.ts')).toBe('b');
+    expect(reg('src/service/gateway/endpoints/userState/index.ts')).toBe('userState');
+  });
+
+  it('endpoints must be a whole path segment', () => {
+    expect(reg('src/fooendpoints/y/index.ts')).toBe(null);
+  });
+});

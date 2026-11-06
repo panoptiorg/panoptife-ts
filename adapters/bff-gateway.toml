@@ -3,12 +3,20 @@
 # themselves. It is here to show that everything shop-specific can be expressed
 # as adapter DATA — nothing about this shape lives in `src/`.
 #
-# Shape:
-#   src/service/gateway/endpoints/<path>/index.ts
+# Shapes (an acme-style gateway serves BOTH; one [[handler]] per shape):
+#   <root>/endpoints/<path>/index.ts
 #       export const $gateway = GatewayEndpoint.create({
 #         name: 'X', gqlNode: !browser && gql`query X($id: ID!) { … }`, mapper })
 #       export const client = $gateway.getClientHandler('<path>')
 #   … consumed anywhere as `apiMain.<name>.call(variables)`.
+#   <root>/**/*.gql.ts — the same body, one operation per file; the gateway
+#   derives the URL from the FILE NAME (`<name>.gql.ts` -> `<name>`).
+#
+# The URL rule of such a gateway comes from the endpoint FILE, never from the
+# string handed to `getClientHandler` (that string can drift from the file
+# name): an `op_dir_regex` capture group 1 IS the registered path. The public
+# prefix (`urlPrefix` / VITE_BASE_URL, e.g. /app/api) is prepended by
+# the serving layer and stays out of the emitted route.
 
 name    = "bff-gateway"
 detect  = ["@acme/gateway", "@acme/mf-core"]
@@ -21,6 +29,11 @@ tags        = ["gql", "graphql"]
 tag_suffix  = [".gql"]
 mapper_prop = "mapper"
 
+# Shape 1 — the endpoints directory: `…/endpoints/<path>/index.ts` registers
+# `<path>`, whatever `<root>` the repo configures (the regex is root-agnostic,
+# so one adapter fits every root). The greedy `(?:.*/)?` prefix mirrors the
+# gateway's own `.*<root>/endpoints/` replace: with nested `endpoints/` dirs
+# the LAST one wins. `index.ts` only — the gateway's glob serves nothing else.
 # `getClientHandler('<path>')` wraps the op into a callable that is re-exported
 # through a registry and invoked as `.call(v)` / `.cache()` / `.fetch(v)`.
 # `route` turns each one into the BFF HTTP surface it actually is.
@@ -29,7 +42,21 @@ kind         = "path"
 factories    = ["getClientHandler", "getHandler", "getSuccessHandler"]
 path_arg     = 0
 on_receiver  = true      # always `<endpoint>.getClientHandler('…')`, never bare
-op_dir_regex = '(?:^|/)endpoints/(.+)/index\.[tj]s$'
+op_dir_regex = '^(?:.*/)?endpoints/(.+)/index\.ts$'
+methods      = ["call", "cache", "fetch", "mutate", "query", "preload", "load"]
+route        = "POST /api/{path}"
+body         = "variables"
+
+# Shape 2 — one operation per file: `<name>.gql.ts` registers `<name>` (the
+# basename up to the FIRST dot — `a.b.gql.ts` registers `a`, like the gateway's
+# `basename.split('.')[0]`), wherever the file sits under the source root.
+# `.ts` only — the gateway's glob does not serve `.gql.js`.
+[[handler]]
+kind         = "path"
+factories    = ["getClientHandler", "getHandler", "getSuccessHandler"]
+path_arg     = 0
+on_receiver  = true
+op_dir_regex = '(?:^|/)([^./]+)\.(?:[^/]+\.)?gql\.ts$'
 methods      = ["call", "cache", "fetch", "mutate", "query", "preload", "load"]
 route        = "POST /api/{path}"
 body         = "variables"

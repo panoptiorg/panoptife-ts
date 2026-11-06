@@ -7,8 +7,18 @@
 //   - anything else                     -> ".<method>"        (the flow model)
 import ts from 'typescript';
 
+/**
+ * Null-prototype lookup tables: these maps are indexed with UNTRUSTED source
+ * names, and on a normal object a key like `toString` or `constructor` resolves
+ * to the inherited `Object.prototype` member — `ROUTE_SOURCE_CALLS['toString']`
+ * handed a function object into `calleeFqn` and crashed the CGF verify.
+ */
+function table<T>(rows: Record<string, T>): Record<string, T> {
+  return Object.assign(Object.create(null) as Record<string, T>, rows);
+}
+
 /** last property name -> the type it stands for */
-export const PROP_TYPE: Record<string, string> = {
+export const PROP_TYPE: Record<string, string> = table({
   searchParams: 'URLSearchParams',
   headers: 'Headers',
   cookies: 'Cookies',
@@ -23,7 +33,7 @@ export const PROP_TYPE: Record<string, string> = {
   style: 'CSSStyleDeclaration',
   classList: 'DOMTokenList',
   dataset: 'DOMStringMap',
-};
+});
 
 export const GLOBALS = new Set([
   'location',
@@ -141,9 +151,9 @@ export const IDENTITY_HOFS = new Set([
  * a microfrontend runtime that declares `{path:'/x/[id]'}` — is a `[[source]]`
  * row in an adapter, merged over this table at resolution time.
  */
-export const ROUTE_SOURCE_CALLS: Record<string, string> = {
+export const ROUTE_SOURCE_CALLS: Record<string, string> = table({
   $props: 'read:page.data',
-};
+});
 
 /** property READS that are untrusted-input surfaces — `read:<path>` call sites. */
 export const SOURCE_READS: Array<{ suffix: string; fqn: string }> = [
