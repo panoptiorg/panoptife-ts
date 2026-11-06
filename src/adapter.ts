@@ -115,7 +115,8 @@ export class AdapterSet {
   /** factory name -> the handler rule that declares it */
   readonly handlerFactories = new Map<string, HandlerRule>();
   readonly handlerMethods = new Set<string>();
-  readonly opDirRegexes: RegExp[] = [];
+  /** each `op_dir_regex` with the `[[handler]]` rule that declared it */
+  readonly opDirRegexes: Array<{ re: RegExp; rule: HandlerRule }> = [];
   /** trailing callee name -> rules, tried in order */
   readonly invokes = new Map<string, InvokeRule[]>();
   readonly callbackFactories = new Set<string>();
@@ -146,7 +147,7 @@ export class AdapterSet {
     for (const h of a.handlers) {
       for (const f of h.factories) this.handlerFactories.set(f, h);
       for (const m of h.methods) this.handlerMethods.add(m);
-      if (h.opDirRegex) this.opDirRegexes.push(h.opDirRegex);
+      if (h.opDirRegex) this.opDirRegexes.push({ re: h.opDirRegex, rule: h });
       if (h.kind === 'doc' || h.kind === 'sdk') this.needsDocIndex = true;
       if (h.kind === 'sdk') for (const f of h.factories) this.sdkFactories.set(f, h);
     }
@@ -173,9 +174,18 @@ export class AdapterSet {
 
   /** the `<path>` an op file registers itself under, or null */
   opDirOf(rel: string): string | null {
-    for (const re of this.opDirRegexes) {
+    return this.opDirRuleOf(rel)?.path ?? null;
+  }
+
+  /** the `<path>` an op file registers itself under and the rule whose
+   *  `op_dir_regex` matched (so the file shape's own `route` can be applied),
+   *  or null. One adapter may carry several rules — one per endpoint file
+   *  shape (…/endpoints/<path>/index.ts, <name>.gql.ts, …); the first that
+   *  matches wins. */
+  opDirRuleOf(rel: string): { path: string; rule: HandlerRule } | null {
+    for (const { re, rule } of this.opDirRegexes) {
       const m = re.exec(rel);
-      if (m && m[1]) return m[1];
+      if (m && m[1]) return { path: m[1], rule };
     }
     return null;
   }

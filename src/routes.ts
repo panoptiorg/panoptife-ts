@@ -27,8 +27,12 @@ export interface RouteDecl {
   method: string;
   /** canonical template (§1.1) — the contract key */
   path: string;
-  /** as derived from the file path, `/api/users/[id]` — reporting only */
+  /** as derived from the file path, `/api/users/[id]` — reporting only; it
+   *  also names the contract endpoint, which several handlers can share */
   display: string;
+  /** this handler's own row display when it differs from `display`
+   *  (`/a/__data.json +layout.server.ts load`, `/a?/save`) */
+  label?: string;
   framework: string;
   /** handler parameter indices that carry request data */
   requestParams: number[];
@@ -99,12 +103,11 @@ export function routeFileOf(
 ): RouteFile | null {
   const base = path.posix.basename(rel);
   const dirSegs = path.posix.dirname(rel).split('/').filter((s) => s && s !== '.');
-  // SvelteKit: the directory under src/routes IS the path; `(group)` is pathless
-  if (/^\+server\.[jt]s$/.test(base) && dirSegs[0] === 'src' && dirSegs[1] === 'routes') {
-    const segs = dirSegs.slice(2).filter((s) => !/^\(.*\)$/.test(s));
+  const svelteDisplay = svelteKitPath(rel);
+  if (/^\+server\.[jt]s$/.test(base) && svelteDisplay !== null) {
     return {
       framework: 'sveltekit',
-      display: '/' + segs.join('/'),
+      display: svelteDisplay,
       handlers: 'verbs',
       method: '',
       requestParams: [0],
@@ -145,6 +148,94 @@ export function routeFileOf(
     };
   }
   return null;
+}
+
+/** SvelteKit: the directory under `src/routes` IS the path; `(group)` is pathless */
+function svelteRouteOfDir(dir: string): string | null {
+  const dirSegs = dir.split('/').filter((s) => s && s !== '.');
+  if (dirSegs[0] !== 'src' || dirSegs[1] !== 'routes') return null;
+  return '/' + dirSegs.slice(2).filter((s) => !/^\(.*\)$/.test(s)).join('/');
+}
+
+/** the URL a SvelteKit route file is mounted at, or null when it is not one */
+export function svelteKitPath(rel: string): string | null {
+  return svelteRouteOfDir(path.posix.dirname(rel));
+}
+
+/**
+ * The directories under `src/routes` that ARE a page — the ones whose
+ * `<dir>/__data.json` SvelteKit actually serves. Any `+page` file makes the
+ * directory a route: `+page.svelte`, `+page.ts`/`.js`, or `+page.server.ts`/`.js`
+ * (a directory with only `+page.server.ts` still answers its `__data.json`).
+ */
+export function svelteKitPageDirs(files: readonly string[]): Set<string> {
+  const out = new Set<string>();
+  for (const f of files) {
+    if (!/^\+page\./.test(path.posix.basename(f))) continue;
+    const dir = path.posix.dirname(f);
+    if (svelteRouteOfDir(dir) !== null) out.add(dir);
+  }
+  return out;
+}
+
+function loadRoute(route: string, file: string): RouteDecl {
+  const display = route === '/' ? '/__data.json' : `${route}/__data.json`;
+  return {
+    method: 'GET',
+    path: canonPath(display),
+    display,
+    label: `${display} ${file} load`,
+    framework: 'sveltekit-load',
+    requestParams: [0],
+  };
+}
+
+/**
+ * The routes a SvelteKit page endpoint is served at. `sym` is a server `load`
+ * (`+page.server` or `+layout.server`) or an `actions.<name>` member
+ * (`+page.server`), as the analyzer already accepted it. `pageDirs` is
+ * `svelteKitPageDirs(repo.files)` — the directories that ARE a page.
+ *  - `load`: the client fetches its data as `GET <route>/__data.json`. A layout
+ *    and a page in one route directory share that URL, so they share one
+ *    contract. In a directory with no `+page` file at all, `<dir>/__data.json`
+ *    is served by nothing: a LAYOUT load only runs as part of each descendant
+ *    page's own `__data.json` request, so it is attached to every descendant
+ *    page directory's URL (route groups `(x)` are pathless, a nested
+ *    `+layout@` reset or a child page is still a descendant) — one contract
+ *    per URL, so the descendant URL's contract carries the page load AND every
+ *    ancestor layout load. With no descendant page, the layout load is served
+ *    nowhere and no route is emitted.
+ *  - an action: `POST <route>`; a named action is `?/<name>` on the same URL,
+ *    and the query is not part of the contract path.
+ */
+export function svelteKitPageRoute(rel: string, sym: string, pageDirs: ReadonlySet<string>): RouteDecl[] {
+  const dir = path.posix.dirname(rel);
+  const route = svelteRouteOfDir(dir);
+  if (route === null) return [];
+  const file = path.posix.basename(rel);
+  if (sym === 'load') {
+    if (pageDirs.has(dir)) return [loadRoute(route, file)];
+    // a page-less directory is not a route; only a layout load still runs —
+    // inside each descendant page's own data request
+    if (!/^\+layout\./.test(file)) return [];
+    return [...pageDirs]
+      .filter((d) => d.startsWith(`${dir}/`))
+      .sort()
+      .map((d) => loadRoute(svelteRouteOfDir(d)!, file));
+  }
+  const m = /^actions\.(.+)$/.exec(sym);
+  if (!m || !pageDirs.has(dir)) return [];
+  const name = m[1]!;
+  return [
+    {
+      method: 'POST',
+      path: canonPath(route),
+      display: route,
+      label: name === 'default' ? route : `${route}?/${name}`,
+      framework: 'sveltekit-action',
+      requestParams: [0],
+    },
+  ];
 }
 
 export function routeDecl(f: RouteFile, method: string): RouteDecl {

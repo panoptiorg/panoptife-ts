@@ -120,6 +120,46 @@ A handler with a `route` becomes an HTTP endpoint with untrusted input: the
 handler function gets `binds_to` pointing at it and `source_params = [0]`.
 `--no-adapter-routes` turns this off.
 
+The endpoint's URL follows the gateway's own rule, which comes from the FILE,
+not from the string the client passes. Wherever the callable is declared, the
+route comes from the file its `$op` lives in. When the callable is declared in
+a file that itself matches `op_dir_regex`, that file is the anchor — even when
+its `$op` is missing (the document did not extract) or the string points
+nowhere: the gateway serves the file regardless. A path string that names no
+registered endpoint file, in a file that is itself served by nothing, gets no
+route — the server does not serve it, and the endpoint file (whose `$op`
+carries the entry) is the single source of the route. An endpoint file that
+matches `op_dir_regex` and holds a document but no factory call still gets the
+route, anchored at its `$op`. The public prefix a gateway prepends
+(`urlPrefix`, `VITE_BASE_URL`) is the serving layer's concern and stays out of
+the route.
+
+#### Several file shapes, several roots
+
+Gateways that serve more than one file shape repeat `[[handler]]` — one table
+per shape, each with its own `op_dir_regex` and the same `factories`. The
+`bff-gateway` adapter does this for the two shapes of the acme gateway:
+`<root>/endpoints/<path>/index.ts` and `<root>/<…>/<name>.gql.ts`. Write the
+regexes root-agnostic (`(?:.*/)?endpoints/(.+)/index\.ts$`,
+`([^./]+)\.(?:[^/]+\.)?gql\.ts$`) so one adapter fits every repo whatever root
+(`src/service/gateway`, `src/shared/gw`, …) its configuration picks.
+The `.gql.ts` capture stops at the FIRST dot of the basename (`a.b.gql.ts`
+registers `a`), like the gateway's own `basename.split('.')[0]`; the greedy
+`(?:.*/)?` prefix of the `endpoints` regex makes the LAST `endpoints/` dir
+win for nested ones, like the gateway's greedy `.*<root>/endpoints/` replace.
+
+What the adapter cannot know is WHERE the gateway's roots are. An acme
+gateway reads `<root>`, `endpointsDir` and `projectRoot` from its
+`gateway.config.js` (defaults `src/service/gateway`, `endpoints`, `src`)
+and serves only `<root>/<endpointsDir>/**/index.ts` and
+`<projectRoot>/**/*.gql.ts`. That config is a JavaScript module: reading it
+would mean evaluating repository code, which an extractor must not do, and no
+adapter format rule can carry a per-repo value. So the regexes match every
+file of the right SHAPE anywhere in the repository. The difference is one
+direction only: an endpoint file outside the configured roots gets an entry
+the gateway would not serve (an over-approximation); no served file is ever
+missed, and no route name is wrong for the files the gateway does serve.
+
 ### `[[invoke]]`: a call with both document and variables
 
 | key | type | meaning |

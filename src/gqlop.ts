@@ -41,7 +41,11 @@ function usesVariable(v: ValueNode): boolean {
   }
 }
 
-/** Parse an operation document and enumerate the fields that carry arguments. */
+/** Parse an operation document and enumerate the fields that reach a resolver:
+ *  every field that carries arguments (any depth) and every ROOT field, even
+ *  one with no arguments — a root selection IS a resolver call, argument-less
+ *  or not (`query UserState { userState { … } }` calls Query.userState), and
+ *  without it the operation would have no `graphql:` contract at all. */
 export function analyzeDocument(text: string, sdl: Sdl): OpDoc[] {
   let doc: DocumentNode;
   try {
@@ -62,30 +66,40 @@ export function analyzeDocument(text: string, sdl: Sdl): OpDoc[] {
     const op: OpDoc = { name: d.name?.value ?? '', fields: [], warnings: [] };
     const root = sdl.rootType(d.operation);
     const seen = new Set<string>();
-    const walk = (parent: string, sel: SelectionSetNode, known: boolean, depth: number): void => {
+    // `atRoot` — the selection sits directly under the operation root (through
+    // fragment spreads and inline fragments too: their fields ARE the root
+    // selection), so it names a resolver even with no arguments. Deeper
+    // selections still need arguments to count.
+    const walk = (
+      parent: string,
+      sel: SelectionSetNode,
+      known: boolean,
+      depth: number,
+      atRoot: boolean,
+    ): void => {
       if (depth > 24) return;
       for (const s of sel.selections) {
         if (s.kind === Kind.FRAGMENT_SPREAD) {
           const f = frags.get(s.name.value);
           if (f && !seen.has(s.name.value)) {
             seen.add(s.name.value);
-            walk(f.on, f.sel, !sdl.empty, depth + 1);
+            walk(f.on, f.sel, !sdl.empty, depth + 1, atRoot);
             seen.delete(s.name.value);
           }
           continue;
         }
         if (s.kind === Kind.INLINE_FRAGMENT) {
-          walk(s.typeCondition?.name.value ?? parent, s.selectionSet, known, depth + 1);
+          walk(s.typeCondition?.name.value ?? parent, s.selectionSet, known, depth + 1, atRoot);
           continue;
         }
         const fname = s.name.value;
         const info = sdl.field(parent, fname);
-        if (s.arguments && s.arguments.length > 0) {
-          if (known || depth === 0) {
+        if ((s.arguments && s.arguments.length > 0) || atRoot) {
+          if (known || atRoot) {
             op.fields.push({
               typeField: `${parent}.${fname}`,
-              argNames: s.arguments.map((a) => a.name.value),
-              argUsesVar: s.arguments.map((a) => usesVariable(a.value)),
+              argNames: (s.arguments ?? []).map((a) => a.name.value),
+              argUsesVar: (s.arguments ?? []).map((a) => usesVariable(a.value)),
               viaSdl: known && !!info,
             });
           } else {
@@ -96,15 +110,15 @@ export function analyzeDocument(text: string, sdl: Sdl): OpDoc[] {
         }
         if (s.selectionSet) {
           const child = info?.type;
-          walk(child ?? `${parent}.${fname}`, s.selectionSet, known && !!child, depth + 1);
+          walk(child ?? `${parent}.${fname}`, s.selectionSet, known && !!child, depth + 1, false);
         }
       }
     };
     if (sdl.empty) {
       op.warnings.push(`graphql-warn: no SDL — root fields only for operation ${op.name || '?'}`);
-      walk(root, d.selectionSet, false, 0);
+      walk(root, d.selectionSet, false, 0, true);
     } else {
-      walk(root, d.selectionSet, true, 0);
+      walk(root, d.selectionSet, true, 0, true);
     }
     out.push(op);
   }

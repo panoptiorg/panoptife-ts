@@ -204,10 +204,28 @@ zero-argument call named `read:page.data`.
 These SvelteKit exports become HTTP endpoints: `load` in `+page.server.ts` and
 `+layout.server.ts`, each member of `actions` in `+page.server.ts`
 (`actions.default`), and `GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `HEAD` and
-`OPTIONS` in `+server.ts` (the `.js` forms too). A `load` or action endpoint is
-named `"<export> <directory>"` (`load src/routes/search`), where the directory
-is the file's repository-relative directory, not a URL. The function gets
-`binds_to` pointing at the endpoint and `source_params = [0]`: its first
+`OPTIONS` in `+server.ts` (the `.js` forms too). Under `src/routes` each one is a
+route (see below). A server `load` is `GET <route>/__data.json`, the URL the
+page fetches its data from (`/__data.json` for the root route), framework
+`sveltekit-load`, row display `<route>/__data.json <file> load`. A form action
+is `POST <route>`, framework `sveltekit-action`, row display `<route>` for
+`default` and `<route>?/<name>` for a named action (the query is not part of
+the contract path). A `+layout.server.ts` load and a `+page.server.ts` load in
+one directory share one URL, so they share one endpoint and both bind to it;
+all actions of a page share the `POST` endpoint. SvelteKit serves
+`<dir>/__data.json` (and `<dir>`) only when the directory is a route — it has
+a `+page` file: `+page.svelte`, `+page.ts`/`.js`, or `+page.server.ts`/`.js`.
+In a directory with no `+page` file a LAYOUT load still runs, as part of each
+descendant page's own `__data.json` request, so it is attached to every
+descendant page URL (groups `(x)` are pathless; a nested `+layout@` reset or a
+child page is still a descendant) — the descendant URL's contract carries the
+page load AND every ancestor layout load. A layout with no descendant page is
+served nowhere: no route, no endpoint. With
+`--no-http-routes`, or
+outside `src/routes`, a `load` or action endpoint is named
+`"<export> <directory>"` (`load src/routes/search`), where the directory is the
+file's repository-relative directory, not a URL. The function gets `binds_to`
+pointing at the endpoint and `source_params = [0]`: its first
 parameter is untrusted. Only exports under their own name count
 (`export function`, `export const`, `export { load }`). Any other file is never
 an endpoint: `+page.ts`, `+layout.ts`, components, and server-only modules
@@ -223,6 +241,8 @@ routes. One table holds every convention the tool knows:
 | convention | file | handlers | method | request params |
 |---|---|---|---|---|
 | SvelteKit | `src/routes/**/+server.{ts,js}` | verb exports | the verb | `[0]` (event) |
+| SvelteKit load | `src/routes/**/+{page,layout}.server.{ts,js}` | `load` | `GET` (`…/__data.json`) | `[0]` (event) |
+| SvelteKit action | `src/routes/**/+page.server.{ts,js}` | `actions.<name>` | `POST` | `[0]` (event) |
 | Next.js App Router | `app/**/route.*` (or `src/app/…`) | verb exports, also `export { h as GET }` | the verb | `[0, 1]` (request, context) |
 | Next.js Pages API | `pages/api/**` (or `src/pages/api/…`) | the default export | `*` (any) | `[0]` (req) |
 | Next.js page | `app/**/page.*` | the default export | `GET` | `[0]` (`params`, `searchParams`) |
@@ -280,7 +300,8 @@ whose parameter 0 is `variables` and whose return value is the result.
 The document is walked against the SDL (object and interface types, type
 extensions, renamed root types in `schema { }`; fragments and inline fragments
 use their type condition). Every field that takes arguments becomes one remote
-call site:
+call site, and so does every ROOT field even when it takes none — a root
+selection IS a resolver call:
 
 - kind `INVOKES_REMOTE`, `callee_fqn = "graphql:<ParentType>.<field>"`;
 - `callee_iids = [ContractIID("graphql:<ParentType>.<field>")]`, the SHA-256
@@ -292,10 +313,19 @@ call site:
   the resolver's parameters. An argument port receives taint when its value
   contains a variable.
 
-Without a schema only root fields are joined. Fields without arguments produce
-no call site. Adapters then connect the `$op` to the code that calls it: a
-handler function (`[[handler]]`), or a direct call carrying both document and
-variables (`[[invoke]]`). See [../adapters/README.md](../adapters/README.md).
+An argument-less root field has no argument ports, so nothing new flows INTO
+the call. Its result port still feeds the `$op` return, though: a resolver
+whose return value carries a server-side source now reaches frontend sinks
+through a field the extractor used to skip — new chains are possible in the
+result direction (server data out), not in the argument direction. The engine
+composes the GraphQL contract the same way either way (`Source` passes through
+to the client's result slot).
+
+Without a schema only root fields are joined. A field BELOW the root without
+arguments produces no call site. Adapters then connect the `$op` to the code
+that calls it: a handler function (`[[handler]]`), or a direct call carrying
+both document and variables (`[[invoke]]`). See
+[../adapters/README.md](../adapters/README.md).
 
 `fixtures/webapp` joins this way to `graphql:Query.searchByToken`, served by
 panoptife-go's `federation` fixture. The two, with `backend` and `downstream`,

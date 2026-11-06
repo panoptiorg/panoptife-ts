@@ -49,6 +49,9 @@ import {
   nextRoots,
   routeDecl,
   routeFileOf,
+  svelteKitPageDirs,
+  svelteKitPageRoute,
+  svelteKitPath,
   type NextRoots,
   type RouteDecl,
 } from './routes.js';
@@ -505,7 +508,7 @@ function findGql(root: ts.Node, ad: AdapterSet): ts.TaggedTemplateExpression[] {
 
 /** Fill an adapter route template. `{path}` is the handler's registered path;
  *  a template with an unfillable placeholder generates no route. */
-function routeNameFor(tpl: string, spec: FnSpec): string | undefined {
+function routeNameFor(tpl: string, spec: { handlerPath?: string; sym: string }): string | undefined {
   let bad = false;
   const out = tpl.replace(/\{(\w+)\}/g, (_m, k: string) => {
     const v = k === 'path' ? spec.handlerPath : k === 'name' ? spec.sym : undefined;
@@ -1195,8 +1198,10 @@ function verbHandlers(unit: FileUnit): Array<[string, FnSpec]> {
  * actions (`spec.action`). A SvelteKit `+server` verb was already an endpoint by
  * name (`GET src/routes/x`); with routes on it becomes the route's contract
  * endpoint instead, so one route is one endpoint whichever framework serves it.
+ * `kitPages` are the SvelteKit directories that ARE a page — the ones whose
+ * `__data.json` is served.
  */
-function markRoutes(unit: FileUnit, next: boolean, roots: NextRoots): void {
+function markRoutes(unit: FileUnit, next: boolean, roots: NextRoots, kitPages: ReadonlySet<string>): void {
   const rf = routeFileOf(unit.rel, next, roots);
   if (rf) {
     const add = (sp: FnSpec, method: string): void => {
@@ -1207,6 +1212,18 @@ function markRoutes(unit: FileUnit, next: boolean, roots: NextRoots): void {
     else {
       const sp = defaultExportSpec(unit, rf.arity);
       if (sp) add(sp, rf.method);
+    }
+  }
+  // a SvelteKit server `load` / form action: the URL its page fetches or posts to
+  if (/^\+(page|layout)\.server\.[jt]s$/.test(path.posix.basename(unit.rel))) {
+    const exported = exportedNames(unit.sf);
+    for (const sp of unit.specs) {
+      if (!sp.endpoint || sp.endpoint !== endpointNameFor(unit.rel, sp.sym, exported)) continue;
+      const rs = svelteKitPageRoute(unit.rel, sp.sym, kitPages);
+      for (const r of rs) (sp.routes ??= []).push(r);
+      // routes on: a load whose URL nothing serves (no `+page` file in the
+      // directory, or a layout with no descendant page) is no endpoint either
+      if (rs.length || svelteKitPath(unit.rel) !== null) sp.endpoint = undefined;
     }
   }
   if (!next) return;
@@ -3203,6 +3220,18 @@ function buildRegular(em: Emitter, unit: FileUnit, spec: FnSpec): Fn {
 
 function buildOp(em: Emitter, unit: FileUnit, spec: FnSpec): Fn {
   const fb = new FlowBuilder();
+  // An endpoint file the gateway serves (its rel path matches an adapter
+  // `op_dir_regex`) IS an HTTP entry even when no `factory('<path>')` call
+  // lives in the file: the gateway glob serves every endpoint file. When
+  // the file has no handler of its own, anchor the route to the operation
+  // (adapters); a file with a handler gets its entry from `buildHandler`.
+  if (em.ad.routes && !unit.specs.some((s) => s.kind === 'handler')) {
+    const reg = em.ad.opDirRuleOf(unit.rel);
+    const route = reg?.rule.route
+      ? routeNameFor(reg.rule.route, { handlerPath: reg.path, sym: spec.sym })
+      : undefined;
+    if (route) spec.endpoint = route;
+  }
   const doc = spec.op!.doc;
   const varsVtx = fb.addVertex(VertexKind.IN_PARAM, 0, 0);
   const varsVal = fb.val();
@@ -3289,6 +3318,25 @@ function buildHandler(em: Emitter, unit: FileUnit, spec: FnSpec): Fn {
     targetRel = unit.byName.has('$op')
       ? unit.rel
       : (em.endpointDirs.get(spec.handlerPath ?? '') ?? '');
+  }
+  // The gateway derives an endpoint file's URL from the FILE (`op_dir_regex`
+  // capture), not from the string the client hands `factory('<path>')` — that
+  // string can drift from the file name. Wherever the handler is declared, the
+  // route comes from the file its `$op` lives in. When the handler's own file
+  // is served (`op_dir_regex` matches it), that file is the anchor even if its
+  // `$op` is missing (the document did not extract) or its string points
+  // nowhere — the gateway serves the file regardless. A path string that names
+  // no registered endpoint file, in a file that is itself served by nothing,
+  // gets no route: nothing serves it, and the endpoint file (whose `$op`
+  // carries the entry) is the single source of the route.
+  if (em.ad.routes && spec.handlerRule?.kind === 'path') {
+    const reg = (targetRel ? em.ad.opDirRuleOf(targetRel) : null) ?? em.ad.opDirRuleOf(unit.rel);
+    if (reg) {
+      const route = routeNameFor(reg.rule.route ?? '', { handlerPath: reg.path, sym: spec.sym });
+      if (route) spec.endpoint = route;
+    } else {
+      spec.endpoint = undefined;
+    }
   }
   if (target && targetRel) {
     const iid = em.iidOf(targetRel, target.sym);
@@ -3482,6 +3530,9 @@ export function build(opts: BuildOpts): Stats {
     );
   }
 
+  // the SvelteKit directories that ARE a page — whose `__data.json` is served
+  const kitPages = httpRoutes ? svelteKitPageDirs(repo.files) : new Set<string>();
+
   for (const u0 of units) {
     const sf =
       rp?.byRel.get(u0.rel) ??
@@ -3500,7 +3551,7 @@ export function build(opts: BuildOpts): Stats {
       );
     const u = parseFile(u0.rel, sf, u0.svelte, sdl, em.stats, ad, parseFlags, u0.map);
     if (!u) continue;
-    if (httpRoutes && !u0.svelte) markRoutes(u, next, roots);
+    if (httpRoutes && !u0.svelte) markRoutes(u, next, roots, kitPages);
     em.units.set(u0.rel, u);
     em.stats.files++;
     const dir = ad.opDirOf(u0.rel);
@@ -3627,7 +3678,7 @@ function emitRoutes(em: Emitter, pkg: CgfPackage, spec: FnSpec, fn: Fn, seen: Se
       iid,
       method: r.method,
       path: r.path,
-      display: r.display,
+      display: r.label ?? r.display,
       handlerIid: fn.id.iid,
       endpointIid: iid,
       requestParams: r.requestParams,

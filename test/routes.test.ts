@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 import { contractIID, endpointIID } from '../src/hash.js';
-import { routeFileOf } from '../src/routes.js';
+import { routeFileOf, svelteKitPageDirs, svelteKitPageRoute, svelteKitPath } from '../src/routes.js';
 import {
   argOf,
   callsites,
@@ -296,5 +296,186 @@ export async function use(q: string) {
     expect(p('src/routes/api/[id]/+server.ts')).toBe('/api/[id]');
     expect(p('src/routes/(app)/+server.js')).toBe('/');
     expect(routeFileOf('app/api/x/route.ts', false)).toBeNull();
+  });
+
+  it('a directory is a page when it has any +page file: svelte, ts, or server.ts', () => {
+    expect(
+      svelteKitPageDirs([
+        'src/routes/a/+page.svelte',
+        'src/routes/b/+page.ts',
+        'src/routes/bx/+page.server.ts',
+      ]),
+    ).toEqual(new Set(['src/routes/a', 'src/routes/b', 'src/routes/bx']));
+    expect(svelteKitPageDirs(['src/routes/a/+page.server.ts', 'lib/+page.svelte'])).toEqual(
+      new Set(['src/routes/a']),
+    );
+    for (const rel of ['src/routes/a/+page.svelte', 'src/routes/a/+page.ts']) {
+      expect(svelteKitPath(rel)).toBe('/a');
+    }
+    // a page +page.server.ts in a dir WITH a page keeps its own URL
+    const dirs = svelteKitPageDirs(['src/routes/a/+page.svelte', 'src/routes/a/+page.server.ts']);
+    expect(svelteKitPageRoute('src/routes/a/+page.server.ts', 'load', dirs)).toHaveLength(1);
+    // a page +page.server.ts in a dir with only itself is served too
+    const alone = svelteKitPageDirs(['src/routes/bx/+page.server.ts']);
+    expect(svelteKitPageRoute('src/routes/bx/+page.server.ts', 'load', alone)[0]!.path).toBe(
+      '/bx/__data.json',
+    );
+    // a layout load in a dir with no +page file flows to the descendant pages
+    const attached = svelteKitPageRoute(
+      'src/routes/shell/+layout.server.ts',
+      'load',
+      new Set(['src/routes/shell/a']),
+    );
+    expect(attached.map((r) => r.path)).toEqual(['/shell/a/__data.json']);
+    expect(attached[0]!.label).toBe('/shell/a/__data.json +layout.server.ts load');
+  });
+});
+
+describe('SvelteKit server load and form actions', () => {
+  const d = extract({
+    'src/routes/+page.svelte': '<h1>home</h1>',
+    'src/routes/+page.server.ts': `
+export const load = async (event) => ({ q: event.url.searchParams.get('q') });
+`,
+    'src/routes/(app)/users/[id]/+layout.server.ts': `
+export async function load(event) { return { id: event.params.id }; }
+`,
+    'src/routes/(app)/users/[id]/+page.server.ts': `
+export async function load(event) { return { tab: event.url.searchParams.get('tab') }; }
+export const actions = {
+  default: async ({ request }) => request.formData(),
+  rename: async (event) => event.request.formData(),
+};
+`,
+    'src/routes/(app)/users/[id]/+page.ts': `
+export const load = async (event) => event.data;
+`,
+  });
+  const rows = () =>
+    routes(d)
+      .map((r) => [r.method, r.path, r.framework, r.display])
+      .sort((a, b) => (String(a[1]) + a[3] < String(b[1]) + b[3] ? -1 : 1));
+
+  it('a server load is GET <route>/__data.json, an action POST <route>', () => {
+    expect(rows()).toEqual([
+      ['GET', '/__data.json', 'sveltekit-load', '/__data.json +page.server.ts load'],
+      ['GET', '/users/{}/__data.json', 'sveltekit-load', '/users/[id]/__data.json +layout.server.ts load'],
+      ['GET', '/users/{}/__data.json', 'sveltekit-load', '/users/[id]/__data.json +page.server.ts load'],
+      ['POST', '/users/{}', 'sveltekit-action', '/users/[id]'],
+      ['POST', '/users/{}', 'sveltekit-action', '/users/[id]?/rename'],
+    ]);
+    for (const r of routes(d)) {
+      expect(r.iid).toBe(b64(contractIID(`http:${r.method} ${r.path}`)));
+      expect(r.endpointIid).toBe(r.iid);
+      expect(r.requestParams).toEqual([0]);
+    }
+  });
+
+  it('a layout and a page load in one directory share one endpoint; both bind to it', () => {
+    const iid = b64(contractIID('http:GET /users/{}/__data.json'));
+    const eps = endpoints(d).filter((e) => e.iid === iid);
+    expect(eps).toHaveLength(1);
+    expect(eps[0]!.name).toBe('GET /users/[id]/__data.json');
+    expect(eps[0]!.untrustedInput).toBe(true);
+    for (const f of ['[id]/+layout.server.ts:load', '[id]/+page.server.ts:load']) {
+      const h = fn(d, f);
+      expect(h.bindsTo, f).toEqual([iid]);
+      expect(h.sourceParams, f).toEqual([0]);
+      const row = routes(d).find((r) => r.handlerIid === (h.id as { iid: string }).iid)!;
+      expect(row.iid, f).toBe(iid);
+    }
+  });
+
+  it('every action binds to the one POST endpoint; the universal +page.ts load is no endpoint', () => {
+    const iid = b64(contractIID('http:POST /users/{}'));
+    expect(endpoints(d).filter((e) => e.iid === iid).map((e) => e.name)).toEqual(['POST /users/[id]']);
+    for (const f of ['+page.server.ts:actions.default', '+page.server.ts:actions.rename']) {
+      expect(fn(d, f).bindsTo, f).toEqual([iid]);
+    }
+    expect(fn(d, '[id]/+page.ts:load').bindsTo ?? []).toEqual([]);
+    expect(endpoints(d).map((e) => String(e.name)).sort()).toEqual([
+      'GET /__data.json',
+      'GET /users/[id]/__data.json',
+      'POST /users/[id]',
+    ]);
+  });
+});
+
+describe('SvelteKit layout in a directory with no +page file', () => {
+  // `+layout.server.ts` in a directory without a `+page` file: SvelteKit
+  // serves no `<dir>/__data.json` there. The layout
+  // load only runs as part of each descendant page's own data request.
+  const files = {
+    'src/routes/shell/+layout.server.ts': `
+export async function load(event) { return { theme: event.url.searchParams.get('theme') }; }
+`,
+    'src/routes/shell/a/+page.svelte': '<h1>a</h1>',
+    'src/routes/shell/a/+page.server.ts': `
+export async function load(event) { return { q: event.url.searchParams.get('q') }; }
+`,
+    'src/routes/shell/b/+page.svelte': '<h1>b</h1>',
+    'src/routes/shell/b/+page.ts': `
+export const load = async (event) => event.data;
+`,
+    // a pageless leaf with no load: its __data.json is served but has no
+    // handler of its own — the layout row alone is its contract
+    'src/routes/shell/c/+page.svelte': '<h1>c</h1>',
+  };
+  const d = extract(files);
+  const rows = routes(d);
+
+  it('the layout load attaches to each descendant page URL; the page-less URL is gone', () => {
+    expect(
+      rows
+        .map((r) => [r.method, r.path, r.framework, r.display])
+        .sort((a, b) => (String(a[1]) + a[3] < String(b[1]) + b[3] ? -1 : 1)),
+    ).toEqual([
+      ['GET', '/shell/a/__data.json', 'sveltekit-load', '/shell/a/__data.json +layout.server.ts load'],
+      ['GET', '/shell/a/__data.json', 'sveltekit-load', '/shell/a/__data.json +page.server.ts load'],
+      ['GET', '/shell/b/__data.json', 'sveltekit-load', '/shell/b/__data.json +layout.server.ts load'],
+      ['GET', '/shell/c/__data.json', 'sveltekit-load', '/shell/c/__data.json +layout.server.ts load'],
+    ]);
+  });
+
+  it('one contract per descendant URL: page load AND layout load share the endpoint', () => {
+    for (const path of ['/shell/a/__data.json', '/shell/b/__data.json', '/shell/c/__data.json']) {
+      const iid = b64(contractIID(`http:GET ${path}`));
+      expect(endpoints(d).filter((e) => e.iid === iid), path).toHaveLength(1);
+    }
+    const layout = fn(d, 'shell/+layout.server.ts:load');
+    // the one layout binds to every descendant page URL it is served within
+    expect(layout.bindsTo).toEqual([
+      b64(contractIID('http:GET /shell/a/__data.json')),
+      b64(contractIID('http:GET /shell/b/__data.json')),
+      b64(contractIID('http:GET /shell/c/__data.json')),
+    ]);
+    expect(layout.sourceParams).toEqual([0]);
+  });
+
+  it('a layout in a directory with no +page file and no descendant page: served nowhere, no endpoint', () => {
+    const dead = extract({
+      // +layout.server.ts, +layout.svelte, nothing under it
+      'src/routes/(app)/(auth)/donate/+layout.server.ts': `
+export async function load(event) { return { x: event.url.searchParams.get('x') }; }
+`,
+      'src/routes/(app)/(auth)/donate/+layout.svelte': '<slot />',
+    });
+    expect(routes(dead)).toEqual([]);
+    expect(endpoints(dead)).toEqual([]);
+    expect(fn(dead, '(auth)/donate/+layout.server.ts:load').bindsTo ?? []).toEqual([]);
+  });
+
+  it('route groups are pathless on both ends: (auth)/donate load reaches donate/list pages', () => {
+    const d2 = extract({
+      'src/routes/(app)/(auth)/donate/+layout.server.ts': `
+export async function load(event) { return { x: event.url.searchParams.get('x') }; }
+`,
+      'src/routes/(app)/(auth)/donate/list/+page.svelte': '<h1>l</h1>',
+      'src/routes/(app)/(auth)/donate/(special)/top/+page.svelte': '<h1>t</h1>',
+    });
+    expect(routes(d2).map((r) => String(r.path)).sort()).toEqual([
+      '/donate/list/__data.json',
+      '/donate/top/__data.json',
+    ]);
   });
 });
