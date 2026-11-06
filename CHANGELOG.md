@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/panoptiorg/panoptife-ts/compare/v0.4.0...v0.5.0) (2026-11-06)
+
+
+### Features
+
+* gateway endpoint roots, SvelteKit page rule, null-prototype tables ([#10](https://github.com/panoptiorg/panoptife-ts/issues/10)) ([640ed70](https://github.com/panoptiorg/panoptife-ts/commit/640ed704f48179ecc353d0265e242633d67d5448))
+
 ## [0.4.0](https://github.com/panoptiorg/panoptife-ts/compare/v0.3.0...v0.4.0) (2026-10-24)
 
 
